@@ -160,6 +160,12 @@ export const DATA_CREDITS = [
       ' · Incident information: ' +
       '<a href="https://inciweb.wildfire.gov/" target="_blank" rel="noopener">InciWeb</a>',
   },
+  {
+    key: 'sa-fire',
+    html:
+      'Incidents and warnings: SA Country Fire Service and Metropolitan Fire Service, Government of South Australia — ' +
+      '<a href="https://data.sa.gov.au/data/dataset/south-australian-country-fire-service-current-incidents-rss-feed" target="_blank" rel="noopener">CC BY-NC-ND</a>',
+  },
   OSM_CREDIT,
   OPENMAPTILES_CREDIT,
   {

@@ -41,3 +41,13 @@
   2026-09-25. Each record names its XYZ tile and expected traffic eligibility.
   Modified, test-only OpenStreetMap data; same ODbL attribution and database
   share-alike terms as the OpenFreeMap fixtures above.
+
+- `sa-cfs-current-incidents.json` — the South Australian CFS/MFS current
+  incidents feed (`https://data.eso.sa.gov.au/feeds/prod/cfs_current_incidents.json`)
+  exactly as served on 2026-10-13 (two records: a CFS and an MFS burn-off). Used by
+  the SA Fire Incidents parser and proxy tests; never loaded at runtime. The
+  dataset listing at data.sa.gov.au states Creative Commons
+  Attribution-NonCommercial-NoDerivs (CC BY-NC-ND): the file is an unmodified
+  copy, test-only. The public-warnings feature layers had no live features
+  when this was captured, so the tests build clearly labelled synthetic
+  GeoJSON from the published layer schemas instead.
