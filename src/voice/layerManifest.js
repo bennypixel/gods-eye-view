@@ -193,26 +193,6 @@ const layers = [
     },
   },
   {
-    id: 'sa-fire-incidents',
-    aliases: ['sa fires', 'south australia fires', 'cfs incidents'],
-    context: false,
-    query: {
-      fields: {
-        type: ['t'],
-        status: ['t'],
-        level: ['t'],
-        agency: ['t'],
-        name: ['t'],
-        region: ['t'],
-        fireBanDistrict: ['t'],
-        ground: ['n'],
-        aircraft: ['n'],
-        reportedTime: ['ms'],
-      },
-      timeField: 'reportedTime',
-    },
-  },
-  {
     id: 'weather-cyclones',
     aliases: ['cyclones', 'hurricanes', 'typhoons', 'tropical storms'],
     context: false,
@@ -392,6 +372,8 @@ const layers = [
 export const VOICE_OFF_LAYERS = Object.freeze({
   'bhote-koshi-2026': 'scene-driven event layer (control_scene)',
   'bhote-koshi-locator': 'scene-driven event layer (control_scene)',
+  'sa-fire-incidents':
+    'regional layer; no voice routing or analyst semantics yet',
 });
 
 const TYPE_NAMES = Object.freeze({
