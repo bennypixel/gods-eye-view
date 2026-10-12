@@ -2,8 +2,9 @@
 
 - Add a keyless SA Road Events layer (Movement group, off by default) showing
   Traffic SA roadworks, incidents, road closures and detours across South
-  Australia. Incidents, 24 h roadworks and closures show by default; long-term
-  roadworks sit behind a row chip. Markers and ground-clamped lines are coloured
+  Australia. Incidents and closures show by default; both roadworks kinds
+  (24 h and long-term, about 1,300 today) sit behind row chips that show how
+  many are hidden. Markers and ground-clamped lines are coloured
   by kind, and clicking one shows its road, direction, lanes closed, speed limit
   and Adelaide-time start and end. The row shows the feed's last-updated time.
   `/api/sa-road-events` pages the ArcGIS MapServer past its 1,000-record cap,

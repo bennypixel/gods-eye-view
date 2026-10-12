@@ -14,14 +14,14 @@ export { createSaRoadEventsSource } from './source.js';
 export const SA_ROAD_EVENTS_LAYER_ID = 'sa-road-events';
 
 /**
- * Point kinds shown until the user changes the row chips. Incidents and
- * 24 h works stay on; long-term "ROADWORKS" are off so they do not drown
- * the rest. Unrecognised kinds stay visible so a new upstream category is
- * never silently hidden. Closures and detours (lines) are always shown.
+ * Point kinds shown until the user changes the row chips. Incidents stay on;
+ * both roadworks kinds ("24HR ROADWORKS" is ~90% of the feed) are off so they
+ * do not drown the rest, and their row chips show how many are hidden.
+ * Unrecognised kinds stay visible so a new upstream category is never silently
+ * hidden. Closures and detours (lines) are always shown.
  */
 export const SA_ROAD_EVENT_DEFAULT_VISIBLE_KINDS = Object.freeze([
   'incident',
-  'works24',
   'unknown',
 ]);
 
@@ -450,15 +450,29 @@ export function createSaRoadEventsLayer({
         ...(index === 0
           ? {
               blurb:
-                'Live Traffic SA incidents, closures, detours and roadworks. Click an event for details. Long-term roadworks are hidden until switched on.',
+                'Live Traffic SA incidents, closures, detours and roadworks. Click an event for details. Roadworks (both kinds) are hidden until switched on with the chips.',
             }
           : {}),
       }));
+      const chipLabel = (text, kind) =>
+        counts.get(kind)
+          ? text + ' · ' + counts.get(kind).toLocaleString('en-AU')
+          : text;
+      const hiddenWorks = ['works24', 'works']
+        .filter((kind) => !_visibleKinds.has(kind))
+        .reduce((sum, kind) => sum + (counts.get(kind) || 0), 0);
       const info = [
         _feed
           ? feedUpdatedText(_feed.fetchedAt, _feed.stale)
           : 'Waiting for Traffic SA',
       ];
+      if (_feed && !visibleCount())
+        info.push('No incidents or closures reported right now');
+      if (hiddenWorks)
+        info.push(
+          hiddenWorks.toLocaleString('en-AU') +
+            ' roadworks hidden; use the chips to show them',
+        );
       if (_feed?.mirror) info.push('Served from the Traffic SA mirror service');
       if (_lastError)
         info.push(
@@ -470,15 +484,16 @@ export function createSaRoadEventsLayer({
         chips: [
           {
             id: 'works24',
-            label: '24 H WORKS',
+            label: chipLabel('24 H WORKS', 'works24'),
             active: _visibleKinds.has('works24'),
-            title: 'Show or hide roadworks that run around the clock',
+            title:
+              'Show or hide roadworks that run around the clock (hidden by default)',
             onClick: () =>
               setKindVisible('works24', !_visibleKinds.has('works24')),
           },
           {
             id: 'works',
-            label: 'ROADWORKS',
+            label: chipLabel('ROADWORKS', 'works'),
             active: _visibleKinds.has('works'),
             title: 'Show or hide long-term roadworks (hidden by default)',
             onClick: () => setKindVisible('works', !_visibleKinds.has('works')),

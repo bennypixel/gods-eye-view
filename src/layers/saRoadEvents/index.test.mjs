@@ -139,23 +139,53 @@ test('a disabled layer never fetches; enabled, it renders and reports stats', as
   assert.equal(h.layer.updateInterval, 120000);
 });
 
-test('incidents and 24 h works show by default; long-term roadworks do not', async () => {
+test('incidents and closures show by default; both roadworks kinds do not', async () => {
   assert.deepEqual(SA_ROAD_EVENT_DEFAULT_VISIBLE_KINDS, [
     'incident',
-    'works24',
     'unknown',
   ]);
   const h = harness([snapshot()]);
   h.layer.enable();
   await h.layer.update();
-  const shown = kindCount('incident') + kindCount('works24');
-  assert.ok(kindCount('works') > 0);
+  const shown = kindCount('incident');
+  assert.ok(kindCount('works') > 0 && kindCount('works24') > 0);
   assert.equal(h.layer.getDiagnostics().shownPoints, shown);
   assert.equal(h.layer.getStats().count, shown + 8, 'lines are always shown');
   const hidden = h
     .entities()
     .filter((e) => e.id.startsWith('sa-road-event:point:') && !e.show);
-  assert.equal(hidden.length, kindCount('works'));
+  assert.equal(hidden.length, kindCount('works') + kindCount('works24'));
+  const { chips, info } = h.layer.getRowControls();
+  assert.ok(chips.every((chip) => chip.active === false));
+  assert.ok(
+    chips[0].label.endsWith(' · ' + kindCount('works24')),
+    chips[0].label,
+  );
+  assert.ok(
+    chips[1].label.endsWith(' · ' + kindCount('works')),
+    chips[1].label,
+  );
+  assert.match(
+    info,
+    new RegExp(kindCount('works24') + kindCount('works') + ' roadworks hidden'),
+  );
+});
+
+test('an empty-looking default reads as quiet, not as an outage', async () => {
+  const h = harness([
+    snapshot({
+      points: points.filter((p) => p.kind !== 'incident'),
+      lines: [],
+    }),
+  ]);
+  h.layer.enable();
+  await h.layer.update();
+  const { info } = h.layer.getRowControls();
+  assert.match(info, /Feed updated 15:20 ACDT/);
+  assert.match(info, /No incidents or closures reported right now/);
+  assert.match(info, /roadworks hidden/);
+  assert.doesNotMatch(info, /unavailable|failed/i);
+  assert.equal(h.layer.getStats().error, null);
 });
 
 test('markers are ground-clamped, kind-coloured and never depth-tested away', async () => {
@@ -226,19 +256,21 @@ test('row chips switch the roadworks kinds without refetching', async () => {
   h.layer.setRowControlsListener(() => repaints++);
   const chip = (id) =>
     h.layer.getRowControls().chips.find((entry) => entry.id === id);
-  assert.equal(chip('works24').active, true);
+  assert.equal(chip('works24').active, false);
   assert.equal(chip('works').active, false);
   const fetches = h.fetches();
   chip('works').onClick();
   assert.equal(chip('works').active, true);
   assert.equal(repaints, 1);
-  assert.equal(h.layer.getDiagnostics().shownPoints, points.length);
-  chip('works24').onClick();
-  assert.equal(chip('works24').active, false);
   assert.equal(
     h.layer.getDiagnostics().shownPoints,
     kindCount('incident') + kindCount('works'),
   );
+  chip('works24').onClick();
+  assert.equal(chip('works24').active, true);
+  assert.equal(h.layer.getDiagnostics().shownPoints, points.length);
+  chip('works24').onClick();
+  assert.equal(chip('works24').active, false);
   chip('works').onClick();
   chip('works').onClick();
   assert.equal(h.fetches(), fetches, 'toggling is local');
@@ -290,7 +322,7 @@ test('a failed or malformed refresh keeps the previous entities and says so', as
   assert.equal(h.layer.getStats().error, 'Traffic SA HTTP 502');
   assert.match(
     h.layer.getRowControls().info,
-    /Feed updated 15:20 ACDT · Last refresh failed; showing the previous data/,
+    /Feed updated 15:20 ACDT.*Last refresh failed; showing the previous data/,
   );
   assert.deepEqual([...h.entities()], before, 'entities are untouched');
 
@@ -303,7 +335,9 @@ test('a failed or malformed refresh keeps the previous entities and says so', as
 
   assert.equal(await h.layer.update(), true);
   assert.equal(h.layer.getStats().error, null);
-  assert.match(h.layer.getRowControls().info, /Feed updated 15:22 ACDT$/);
+  const recovered = h.layer.getRowControls().info;
+  assert.match(recovered, /Feed updated 15:22 ACDT/);
+  assert.doesNotMatch(recovered, /failed/);
 });
 
 test('an unchanged snapshot keeps entity identity but still advances the feed time', async () => {
@@ -416,6 +450,10 @@ test('hiding a kind drops the card of a selected event of that kind', async () =
   h.layer.enable();
   await h.layer.update();
   const works = points.find((r) => r.kind === 'works24');
+  h.layer
+    .getRowControls()
+    .chips.find((c) => c.id === 'works24')
+    .onClick();
   p.state.next = { id: `sa-road-event:point:${works.id}` };
   click(h);
   assert.equal(cardOf(h).length, 1);
@@ -467,7 +505,7 @@ test('analyst records are the visible events without geometry', async () => {
   h.layer.enable();
   await h.layer.update();
   const rows = h.layer.getAnalystRecords();
-  assert.equal(rows.length, 8 + kindCount('incident') + kindCount('works24'));
+  assert.equal(rows.length, 8 + kindCount('incident'));
   for (const row of rows) {
     assert.ok(Number.isFinite(row.lat) && Number.isFinite(row.lon));
     assert.equal(row.lines, undefined);
