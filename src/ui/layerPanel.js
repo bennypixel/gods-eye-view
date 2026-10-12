@@ -55,6 +55,7 @@ const PANEL_GROUPS = [
       'weather-radar',
       'weather-satellite',
       'weather-lightning',
+      'bom-radar',
       'weather-cyclones',
     ],
   },
