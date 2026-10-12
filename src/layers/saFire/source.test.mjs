@@ -8,7 +8,7 @@ import { saFireProxy } from '../../../server/providers/saFire.js';
 const fixture = JSON.parse(
   readFileSync(
     new URL(
-      '../../data/fixtures/sa-cfs-current-incidents.json',
+      '../../data/fixtures/sa-fire-incidents.synthetic.json',
       import.meta.url,
     ),
     'utf8',

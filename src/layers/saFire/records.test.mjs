@@ -10,11 +10,11 @@ import {
   validateSaFireSnapshot,
 } from './records.js';
 
-// Real feed, captured 2026-10-13 (see src/data/fixtures/README.md).
+// SYNTHETIC fixture shaped like the public feed (see src/data/fixtures/README.md).
 const fixture = JSON.parse(
   readFileSync(
     new URL(
-      '../../data/fixtures/sa-cfs-current-incidents.json',
+      '../../data/fixtures/sa-fire-incidents.synthetic.json',
       import.meta.url,
     ),
     'utf8',
@@ -30,15 +30,15 @@ const at = (lat, lon) => ({
   coordinates: { lat, lon },
 });
 
-test('the real fixture normalizes: string coordinates become numbers, times become UTC', () => {
+test('the fixture normalizes: string coordinates become numbers, times become UTC', () => {
   const rows = normalizeSaIncidents(fixture);
   assert.equal(rows.length, 2);
   assert.deepEqual(rows[0], {
-    id: 'F2610120119',
+    id: 'F0000000001',
     agency: 'CFS',
-    name: 'MOUNT COMPASS',
-    lat: -35.354339,
-    lon: 138.626986,
+    name: 'TEST PLAINS',
+    lat: -35.35,
+    lon: 138.62,
     region: 'R1',
     fireBanDistrict: 'MOUNT LOFTY RANGES',
     type: 'BURN OFF',
@@ -84,7 +84,7 @@ test('missing, blank, NaN and non-finite coordinates skip only that record', () 
   const rows = normalizeSaIncidents([...bad, fixture[1]]);
   assert.deepEqual(
     rows.map((row) => row.id),
-    ['F2608270132'],
+    ['F0000000002'],
   );
   assert.deepEqual(
     normalizeSaIncidents([incident({ location: undefined })]),
@@ -130,7 +130,7 @@ test('duplicate ids keep the first record; unknown agencies and statuses are kep
       ['42', 'CFS', 'Controlled', 'L1'],
     ],
   );
-  assert.equal(rows[0].lat, -35.354339, 'the first duplicate wins');
+  assert.equal(rows[0].lat, -35.35, 'the first duplicate wins');
 });
 
 test('text fields are control-stripped, bounded and never non-strings', () => {
@@ -533,7 +533,7 @@ test('warnings link to an incident only on an explicit numeric match', () => {
       location: at('-34.9', '138.6'),
     }),
     incident({
-      id: 'F2610120119',
+      id: 'F0000000001',
       agency: 'CFS',
       location: at('-35.0', '138.7'),
     }),

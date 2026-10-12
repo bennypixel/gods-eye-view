@@ -3,10 +3,11 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { saFireProxy } from '../../server/providers/saFire.js';
 
-// Real feed captured 2026-10-13; the warnings payloads below are SYNTHETIC
-// (the live public-warnings layers were empty) and follow the layer schemas.
+// Everything here is SYNTHETIC: the incidents fixture mirrors the public
+// feed's shape, and the warnings payloads follow the published layer schemas
+// (the live public-warnings layers were empty).
 const incidentsBody = readFileSync(
-  new URL('./fixtures/sa-cfs-current-incidents.json', import.meta.url),
+  new URL('./fixtures/sa-fire-incidents.synthetic.json', import.meta.url),
   'utf8',
 );
 const MODIFIED = 'Tue, 13 Oct 2026 03:00:00 GMT';
@@ -116,7 +117,7 @@ for (const hook of ['configureServer', 'configurePreviewServer']) {
     assert.equal(res.headers['X-Data-Stale'], undefined);
     assert.equal(res.body.stale, false);
     assert.equal(res.body.incidents.length, 2);
-    assert.equal(res.body.incidents[0].lat, -35.354339);
+    assert.equal(res.body.incidents[0].lat, -35.35);
     assert.equal(res.body.warningsAvailable, true);
     assert.equal(res.body.warnings.length, 1);
     assert.equal(res.body.warnings[0].id, 'g:1');
@@ -179,11 +180,6 @@ test('a first-ever HTML or wrong-content-type response is a sanitized 502', asyn
       new Response(incidentsBody, {
         headers: { 'Content-Type': 'text/plain' },
       }),
-    // A JSON content type does not excuse an error page in the body.
-    () =>
-      new Response('[{"id":"File Unavailable"}]', {
-        headers: { 'Content-Type': 'application/json' },
-      }),
   ]) {
     const up = router({ ...healthy(), incidents: response });
     const request = install({ fetchImpl: up.fetchImpl });
@@ -192,6 +188,21 @@ test('a first-ever HTML or wrong-content-type response is a sanitized 502', asyn
     assert.deepEqual(res.body, { error: 'sa_fire_unavailable' });
     assert.equal(res.headers['X-Data-Stale'], undefined);
   }
+});
+
+test('incident text that mentions a file page is data, not an error page', async () => {
+  const odd = JSON.parse(incidentsBody);
+  odd[0].location.name = 'File Unavailable Road';
+  const up = router({
+    ...healthy(),
+    incidents: () =>
+      new Response(JSON.stringify(odd), {
+        headers: { 'Content-Type': 'application/json' },
+      }),
+  });
+  const res = await install({ now: () => NOW0, fetchImpl: up.fetchImpl })();
+  assert.equal(res.status, 200);
+  assert.equal(res.body.incidents[0].name, 'File Unavailable Road');
 });
 
 test('JSON that is not an array is a failure, and malformed JSON never caches', async () => {

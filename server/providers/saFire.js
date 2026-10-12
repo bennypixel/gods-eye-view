@@ -2,7 +2,7 @@ import {
   normalizeSaIncidents,
   normalizeSaWarnings,
 } from '../../src/layers/saFire/records.js';
-import { readResponseTextCapped, coalesceProxyRequest } from './common/http.js';
+import { readResponseJsonCapped, coalesceProxyRequest } from './common/http.js';
 import { makeRateLimiter, clientKey } from './common/rate-limit.js';
 
 const USER_AGENT =
@@ -11,7 +11,8 @@ const USER_AGENT =
 // South Australian Country Fire Service / Metropolitan Fire Service current
 // incidents (ESO public JSON, keyless). The retired CRIIMSON XML URLs now
 // answer HTTP 200 with an HTML "File Unavailable" page, so a 200 alone proves
-// nothing: content type, body and shape are all checked below.
+// nothing: the content type must be JSON and the payload shape is checked
+// below.
 const INCIDENTS_URL =
   'https://data.eso.sa.gov.au/feeds/prod/cfs_current_incidents.json';
 
@@ -67,8 +68,8 @@ export function saFireProxy({
     return { ttl, value: null, savedAt: 0, failures: 0, nextAttemptAt: 0 };
   }
 
-  /** GET a fixed URL and return the capped body text, or throw. */
-  async function upstreamText(url, cap, timeout) {
+  /** GET a fixed URL and return its capped, parsed JSON (plus the response), or throw. */
+  async function upstreamJson(url, cap, timeout) {
     const signal = AbortSignal.timeout(timeout);
     const response = await fetchImpl(url, {
       signal,
@@ -86,15 +87,17 @@ export function saFireProxy({
       await response.body?.cancel();
       throw new Error('unexpected_content_type');
     }
-    const text = await readResponseTextCapped(response, cap, signal);
-    // Defence in depth for error pages served with a JSON content type.
-    if (/File Unavailable/i.test(text)) throw new Error('file_unavailable');
-    return { text, response };
+    const payload = await readResponseJsonCapped(response, cap, signal);
+    return { payload, response };
   }
 
   async function fetchIncidents() {
-    const { text, response } = await upstreamText(INCIDENTS_URL, MIB, 15_000);
-    const rows = normalizeSaIncidents(JSON.parse(text));
+    const { payload, response } = await upstreamJson(
+      INCIDENTS_URL,
+      MIB,
+      15_000,
+    );
+    const rows = normalizeSaIncidents(payload);
     if (!rows) throw new Error('invalid_snapshot');
     const modified = Date.parse(response.headers.get('last-modified') || '');
     return {
@@ -108,12 +111,11 @@ export function saFireProxy({
   async function fetchLayer(layer) {
     const features = [];
     for (let page = 0; page < MAX_WARNING_PAGES; page++) {
-      const { text } = await upstreamText(
+      const { payload } = await upstreamJson(
         warningsUrl(layer, features.length),
         8 * MIB,
         20_000,
       );
-      const payload = JSON.parse(text);
       // ArcGIS reports errors as HTTP 200 with an {error} body.
       if (!Array.isArray(payload?.features)) throw new Error('invalid_layer');
       features.push(...payload.features);
