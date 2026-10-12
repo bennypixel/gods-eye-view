@@ -334,7 +334,7 @@ This implementation is original; those contributions have not been merged here.
   deployment must not enable it without BoM's permission. No imagery is bundled, committed, cached on
   disk or used in test fixtures (tests use synthetic bytes).
 - **Meaning:** observed radar echoes (rain intensity colours), not a forecast, warning or all-clear.
-  Frame times come from the file names (UTC) and are shown in Adelaide time. Frame spacing is irregular,
+  Frame times come from the file names (UTC) and are shown in the viewer's own time zone with its abbreviation and a relative age. Frame spacing is irregular,
   so the directory listing, never a guessed time, decides which frames exist; the last 12 are looped
   (about 0.5 s a frame, 1.5 s on the newest).
 - **Georeferencing:** the images are gnomonic projections. They are draped on the rectangle spanned by

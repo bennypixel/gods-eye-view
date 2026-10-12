@@ -2,7 +2,7 @@
 
 - Add an opt-in **AU rain radar** layer (Weather group): Bureau of Meteorology
   radar for every Australian radar in BoM's anonymous-FTP listing, looped from
-  the last 12 frames and shown in Adelaide time. It is off unless the server
+  the last 12 frames and shown in the viewer's local time. It is off unless the server
   operator sets `BOM_RADAR_ENABLED=1`, because BoM allows personal or
   in-organisation use only (no redistribution; public deployments need BoM
   permission). The local server fetches frames live over one shared FTP

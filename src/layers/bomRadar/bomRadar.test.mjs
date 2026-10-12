@@ -5,7 +5,7 @@ import {
   BOM_FRAME_MS,
   BOM_HOLD_MS,
   createBomRadarLayer,
-  formatAdelaideTime,
+  formatLocalTime,
 } from './index.js';
 import { createBomRendering } from './rendering.js';
 import { BOM_RADAR_OFF_MESSAGE, BomRadarDisabledError } from './source.js';
@@ -210,6 +210,7 @@ function harness(t, options = {}) {
       return canvas;
     },
     now: () => stamp(11) + 90_000,
+    timeZone: 'Australia/Adelaide',
     documentRef: doc,
     eventTarget: win,
     matchMedia: () =>
@@ -433,23 +434,23 @@ test('when the operator has not enabled it, the layer says so and draws nothing'
   h.layer.destroy();
 });
 
-test('the row shows the radar, range, Adelaide-time frame and the credit', async (t) => {
+test('the row shows the radar, range, local-time frame, age and the credit', async (t) => {
   const h = harness(t);
   await h.enable();
   const controls = h.layer.getRowControls();
   const lines = controls.info.split('\n');
-  assert.equal(lines[0], 'Adelaide 64 km · 02:30 ACDT');
-  assert.match(lines[1], /^56m ago · frame 1\/12$/);
+  assert.equal(lines[0], 'Adelaide 64 km · 02:30 ACDT · 56 min ago');
+  assert.equal(lines[1], 'Frame 1/12');
   assert.match(controls.info, /Bureau of Meteorology · personal use only/);
   assert.match(controls.infoTitle, /personal or in-organisation use only/);
-  assert.match(controls.infoTitle, /Adelaide time/);
+  assert.match(controls.infoTitle, /your own time zone/);
   assert.equal(controls.legend.length, 5);
   assert.deepEqual(
     controls.chips.map(({ id }) => id),
     ['play', 'opacity-light', 'opacity-strong', 'coverage'],
   );
   t.mock.timers.tick(BOM_FRAME_MS);
-  assert.match(h.layer.getRowControls().info, /frame 2\/12/);
+  assert.match(h.layer.getRowControls().info, /Frame 2\/12/);
   assert.equal(h.layer.getStats().countLabel, '64 km');
   // The chips drive the layer through the usual parameters.
   h.layer.setParams({ opacity: 'light' });
@@ -461,10 +462,22 @@ test('the row shows the radar, range, Adelaide-time frame and the credit', async
   h.layer.destroy();
 });
 
-test('frame times read in Adelaide time with the correct zone', () => {
-  assert.equal(formatAdelaideTime(Date.UTC(2026, 9, 12, 16, 9)), '02:39 ACDT');
-  assert.equal(formatAdelaideTime(Date.UTC(2026, 6, 12, 16, 9)), '01:39 ACST');
-  assert.equal(formatAdelaideTime(NaN), 'Unavailable');
+test('frame times read in the requested or default zone with its abbreviation', () => {
+  const adelaide = 'Australia/Adelaide';
+  assert.equal(
+    formatLocalTime(Date.UTC(2026, 9, 12, 16, 9), adelaide),
+    '02:39 ACDT',
+  );
+  assert.equal(
+    formatLocalTime(Date.UTC(2026, 6, 12, 16, 9), adelaide),
+    '01:39 ACST',
+  );
+  assert.equal(
+    formatLocalTime(Date.UTC(2026, 9, 12, 16, 9), 'Australia/Perth'),
+    '00:09 AWST',
+  );
+  assert.ok(formatLocalTime(Date.UTC(2026, 9, 12, 16, 9)).length > 6);
+  assert.equal(formatLocalTime(NaN), 'Unavailable');
 });
 
 test('moving the camera re-selects the product once, after the debounce', async (t) => {
@@ -493,7 +506,7 @@ test('moving the camera re-selects the product once, after the debounce', async 
   assert.ok(h.collection.layers.length <= 12);
   assert.equal(
     h.layer.getRowControls().info.split('\n')[0],
-    'Adelaide 128 km · 02:30 ACDT',
+    'Adelaide 128 km · 02:30 ACDT · 56 min ago',
   );
   // Moving without crossing a threshold keeps the product (no reload).
   h.camera.positionCartographic.height = 420_000;

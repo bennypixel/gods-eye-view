@@ -25,19 +25,23 @@ const LEGEND = [
   ['Extreme', '#c80000', 'Extreme rain rates'],
 ];
 
-const adelaideClock = new Intl.DateTimeFormat('en-AU', {
-  timeZone: 'Australia/Adelaide',
-  hour: '2-digit',
-  minute: '2-digit',
-  hourCycle: 'h23',
-  timeZoneName: 'short',
-});
-
-/** `02:39 ACDT`: a UTC epoch in Adelaide time, with its zone abbreviation. */
-export function formatAdelaideTime(timeMs) {
+/**
+ * `02:39 ACDT`: a UTC epoch in the viewer's own time zone (the browser's
+ * default, or `timeZone` when given), with its zone abbreviation. The layer
+ * covers all of Australia, so no single local zone would suit every radar.
+ */
+export function formatLocalTime(timeMs, timeZone) {
   if (!Number.isFinite(timeMs)) return 'Unavailable';
   const parts = Object.fromEntries(
-    adelaideClock.formatToParts(new Date(timeMs)).map((p) => [p.type, p.value]),
+    new Intl.DateTimeFormat('en-AU', {
+      ...(timeZone ? { timeZone } : {}),
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+      timeZoneName: 'short',
+    })
+      .formatToParts(new Date(timeMs))
+      .map((p) => [p.type, p.value]),
   );
   return `${parts.hour}:${parts.minute} ${parts.timeZoneName}`;
 }
@@ -45,8 +49,8 @@ export function formatAdelaideTime(timeMs) {
 const ageText = (timeMs, nowMs) => {
   const minutes = Math.max(0, Math.floor((nowMs - timeMs) / 60_000));
   return minutes >= 60
-    ? `${Math.floor(minutes / 60)}h ${minutes % 60}m ago`
-    : `${minutes}m ago`;
+    ? `${Math.floor(minutes / 60)} h ${minutes % 60} min ago`
+    : `${minutes} min ago`;
 };
 
 async function mapPool(items, limit, worker) {
@@ -84,6 +88,7 @@ export function createBomRadarLayer({
   decodeImage = decodeInfraredImage,
   createCanvas = () => document.createElement('canvas'),
   now = () => Date.now(),
+  timeZone = undefined,
   documentRef = globalThis.document,
   eventTarget = globalThis.window,
   matchMedia = globalThis.matchMedia?.bind(globalThis),
@@ -552,8 +557,8 @@ export function createBomRadarLayer({
       if (off) lines.push('Off · personal use only');
       else if (frame && place) {
         lines.push(
-          `${place} · ${formatAdelaideTime(frame.timeMs)}`,
-          `${ageText(frame.timeMs, now())} · frame ${shownIndex + 1}/${count}${loading ? ' · loading' : ''}`,
+          `${place} · ${formatLocalTime(frame.timeMs, timeZone)} · ${ageText(frame.timeMs, now())}`,
+          `Frame ${shownIndex + 1}/${count}${loading ? ' · loading' : ''}`,
         );
       } else
         lines.push(
@@ -603,7 +608,7 @@ export function createBomRadarLayer({
         })),
         info: lines.join('\n'),
         infoTitle:
-          'Bureau of Meteorology rain radar, fetched live by this server over anonymous FTP. BoM allows personal or in-organisation use only: no redistribution, no public deployment. Frame times shown in Adelaide time. Images are georeferenced by their corner coordinates; the longest-range products can misregister by a few kilometres. Radar echoes are observed rainfall, not a forecast or warning.',
+          'Bureau of Meteorology rain radar, fetched live by this server over anonymous FTP. BoM allows personal or in-organisation use only: no redistribution, no public deployment. Frame times are shown in your own time zone. Images are georeferenced by their corner coordinates; the longest-range products can misregister by a few kilometres. Radar echoes are observed rainfall, not a forecast or warning.',
       };
     },
     setRowControlsListener(value) {
