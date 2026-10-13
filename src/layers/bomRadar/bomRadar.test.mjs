@@ -177,6 +177,7 @@ function harness(t, options = {}) {
     },
     async getFrameImage({ file }) {
       calls.images.push(file);
+      await state.imageGate;
       if (state.failImage(file)) throw new Error('frame fetch failed');
       return new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
     },
@@ -566,6 +567,45 @@ test('radar locations still arriving are polled again soon', async (t) => {
   for (let i = 0; i < 10; i++) await h.run(Promise.resolve());
   assert.equal(h.calls.products, 2);
   assert.equal(h.collection.layers.length, 12);
+  h.layer.destroy();
+});
+
+test('a retry that fires during a frame preload is deferred, not dropped', async (t) => {
+  const h = harness(t);
+  let release;
+  h.state.imageGate = new Promise((resolve) => {
+    release = resolve;
+  });
+  // Only a far radar is known at first; the nearer one is still being located.
+  h.state.complete = false;
+  h.state.radars = [
+    {
+      id: '14',
+      products: ['IDR141'],
+      center: { lat: -37.75, lon: 140.78 },
+    },
+  ];
+  h.layer.enable();
+  const first = h.layer.update(h.viewer);
+  await flush();
+  assert.deepEqual(h.calls.frames, ['IDR141']);
+  assert.equal(h.calls.images.length > 0, true, 'the preload is pending');
+  // The 5 s retry fires while that preload is still in flight.
+  t.mock.timers.tick(5_000);
+  await flush();
+  assert.equal(h.calls.products, 1, 'nothing re-fetched mid-request');
+  // Discovery finishes, then the preload settles.
+  h.state.radars = RADARS;
+  h.state.complete = true;
+  release();
+  await h.run(first);
+  assert.equal(h.layer.getDiagnostics().product, 'IDR141');
+  t.mock.timers.tick(5_000);
+  for (let i = 0; i < 10; i++) await h.run(Promise.resolve());
+  assert.equal(h.calls.products, 2, 'the deferred retry ran');
+  assert.equal(h.layer.getDiagnostics().product, 'IDR644');
+  assert.equal(h.layer.getDiagnostics().radar, '64');
+  assert.doesNotMatch(h.layer.getRowControls().info, /Locating radars/);
   h.layer.destroy();
 });
 

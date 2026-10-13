@@ -389,7 +389,10 @@ export function createBomRadarLayer({
     if (!enabled || productsComplete) return;
     retryTimer = setTimeout(() => {
       retryTimer = null;
-      if (enabled && !request) void layer.update(viewer);
+      if (!enabled) return;
+      // A request still in flight (a preload, say) must not swallow the retry.
+      if (request) scheduleRetry();
+      else void layer.update(viewer);
     }, PRODUCTS_RETRY_MS);
   }
   function scheduleReselect() {
