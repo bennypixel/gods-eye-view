@@ -337,6 +337,7 @@ This implementation is original; those contributions have not been merged here.
   Frame times come from the file names (UTC) and are shown in the viewer's own time zone with its abbreviation and a relative age. Frame spacing is irregular,
   so the directory listing, never a guessed time, decides which frames exist; the last 12 are looped
   (about 0.5 s a frame, 1.5 s on the newest).
+- **Display cleanup:** each PNG carries its own title bar (top 16 rows) and caption text. Before display, those rows and any pixel that is exactly opaque black or the header grey (193, 193, 193) are made transparent, on both hosts. This only hides the image's own furniture; rain pixels are not modified.
 - **Georeferencing:** the images are gnomonic projections. They are draped on the rectangle spanned by
   the `.map` corner coordinates, which misregisters by a few kilometres at the longest ranges
   (more at 512 km than at 128 or 64 km).

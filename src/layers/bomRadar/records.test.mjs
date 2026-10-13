@@ -7,6 +7,8 @@ import {
   groupBomProductsByRadar,
   isBomFrameFile,
   isBomProduct,
+  BOM_HEADER_ROWS,
+  maskBomFurniture,
   newestBomFrames,
   parseBomFrameName,
   parseBomFrameTime,
@@ -211,5 +213,88 @@ test('radars group their products and sort numerically', () => {
       { id: '64', products: ['IDR641', 'IDR643', 'IDR644'] },
       { id: '101', products: ['IDR1013'] },
     ],
+  );
+});
+
+test('the radar title bar and caption are made transparent; rain is untouched', () => {
+  const width = 512;
+  const height = 512;
+  const rgba = new Uint8ClampedArray(width * height * 4);
+  const set = (x, y, color) => rgba.set(color, (y * width + x) * 4);
+  const RAIN = [
+    [245, 245, 255, 255],
+    [181, 181, 255, 255],
+    [12, 12, 255, 255],
+    [0, 151, 145, 255],
+    [0, 102, 102, 255],
+  ];
+  // Header: opaque grey bar with black text, plus rain-coloured pixels in it.
+  for (let y = 0; y < BOM_HEADER_ROWS; y++)
+    for (let x = 0; x < width; x++)
+      set(x, y, (x + y) % 7 === 0 ? [0, 0, 0, 255] : [193, 193, 193, 255]);
+  set(100, 3, RAIN[0]);
+  // Caption in rows 496-511: black text next to genuine rain pixels.
+  for (let x = 52; x < 489; x += 3) set(x, 500, [0, 0, 0, 255]);
+  set(300, 498, RAIN[0]);
+  set(301, 506, RAIN[1]);
+  // Rain, a translucent black shadow and a stray grey inside the picture.
+  RAIN.forEach((color, i) => set(200 + i, 250, color));
+  set(210, 250, [0, 0, 0, 128]);
+  set(211, 250, [193, 193, 193, 200]);
+  set(212, 250, [0, 0, 0, 255]);
+  set(213, 250, [193, 193, 193, 255]);
+  const before = rgba.slice();
+
+  assert.equal(maskBomFurniture(rgba, width, height), rgba, 'in place');
+  const at = (x, y) => [
+    ...rgba.slice((y * width + x) * 4, (y * width + x) * 4 + 4),
+  ];
+  const was = (x, y) => [
+    ...before.slice((y * width + x) * 4, (y * width + x) * 4 + 4),
+  ];
+
+  for (let y = 0; y < BOM_HEADER_ROWS; y++)
+    for (let x = 0; x < width; x++)
+      assert.deepEqual(at(x, y), [0, 0, 0, 0], `header ${x},${y}`);
+  for (let x = 52; x < 489; x += 3) assert.deepEqual(at(x, 500), [0, 0, 0, 0]);
+  assert.deepEqual(at(212, 250), [0, 0, 0, 0]);
+  assert.deepEqual(at(213, 250), [0, 0, 0, 0]);
+  // Everything else is preserved byte for byte.
+  for (const [x, y] of [
+    [300, 498],
+    [301, 506],
+    [200, 250],
+    [201, 250],
+    [202, 250],
+    [203, 250],
+    [204, 250],
+    [210, 250],
+    [211, 250],
+    [0, 16],
+    [511, 511],
+  ])
+    assert.deepEqual(at(x, y), was(x, y), `kept ${x},${y}`);
+  const changed = [];
+  for (let i = BOM_HEADER_ROWS * width * 4; i < rgba.length; i++)
+    if (rgba[i] !== before[i]) changed.push(i);
+  assert.equal(changed.length > 0, true);
+  assert.deepEqual(at(300, 498), RAIN[0]);
+});
+
+test('masking rejects a buffer that does not match its dimensions', () => {
+  assert.throws(
+    () => maskBomFurniture(new Uint8ClampedArray(12), 2, 2),
+    /Invalid/,
+  );
+  assert.throws(() => maskBomFurniture(null, 2, 2), /Invalid/);
+  assert.throws(
+    () => maskBomFurniture(new Uint8ClampedArray(4), 0, 1),
+    /Invalid/,
+  );
+  const short = new Uint8ClampedArray(4 * 4 * 4).fill(255);
+  maskBomFurniture(short, 4, 4);
+  assert.ok(
+    short.every((v) => v === 0),
+    'an image shorter than the header is all header',
   );
 });

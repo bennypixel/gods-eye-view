@@ -206,3 +206,41 @@ export function parseBomRadarMap(text) {
     bounds,
   };
 }
+
+/** Rows at the top of every BoM radar image taken by an opaque title bar. */
+export const BOM_HEADER_ROWS = 16;
+
+/**
+ * Hide the furniture BoM bakes into each radar PNG: a title bar across the
+ * first 16 rows, and the caption text (pure opaque black) and header grey
+ * (193, 193, 193) anywhere else. The rain palette never contains either colour.
+ * Display-only cleanup of an RGBA buffer, in place: matching pixels become fully
+ * transparent and every other byte is left exactly as it was.
+ * @param {Uint8ClampedArray|Uint8Array} rgba Row-major RGBA pixels.
+ * @param {number} width
+ * @param {number} height
+ * @returns {Uint8ClampedArray|Uint8Array} The same buffer.
+ */
+export function maskBomFurniture(rgba, width, height) {
+  if (
+    !Number.isInteger(width) ||
+    !Number.isInteger(height) ||
+    width < 1 ||
+    height < 1 ||
+    !rgba ||
+    rgba.length !== width * height * 4
+  )
+    throw new TypeError('Invalid radar pixel buffer');
+  const header = Math.min(height, BOM_HEADER_ROWS) * width * 4;
+  rgba.fill(0, 0, header);
+  for (let i = header; i < rgba.length; i += 4) {
+    if (rgba[i + 3] !== 255) continue;
+    const r = rgba[i];
+    if (
+      (r === 0 && rgba[i + 1] === 0 && rgba[i + 2] === 0) ||
+      (r === 193 && rgba[i + 1] === 193 && rgba[i + 2] === 193)
+    )
+      rgba.fill(0, i, i + 4);
+  }
+  return rgba;
+}

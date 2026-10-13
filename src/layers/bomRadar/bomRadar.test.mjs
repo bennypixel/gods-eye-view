@@ -204,7 +204,18 @@ function harness(t, options = {}) {
       const canvas = {
         width: 0,
         height: 0,
-        getContext: () => ({ drawImage() {} }),
+        getContext: () => ({
+          drawImage() {},
+          // A frame whose first pixel is the opaque grey title bar.
+          getImageData: (_x, _y, w, h) => {
+            const data = new Uint8ClampedArray(w * h * 4);
+            data.set([193, 193, 193, 255]);
+            return { data };
+          },
+          putImageData(pixels) {
+            canvas.masked = pixels.data;
+          },
+        }),
       };
       canvases.push(canvas);
       return canvas;
@@ -274,6 +285,12 @@ test('enabling preloads the loop, shows one frame and credits the Bureau', async
   assert.deepEqual(h.calls.frames, ['IDR644']);
   assert.equal(h.calls.images.length, 12);
   assert.equal(h.collection.layers.length, 12, 'one resident layer per frame');
+  assert.ok(
+    h.canvases.every((canvas) =>
+      canvas.masked.slice(0, 4).every((v) => v === 0),
+    ),
+    'the title bar is hidden before any host draws the frame',
+  );
   assert.equal(h.shownLayers(), 1, 'every other frame sits at zero opacity');
   assert.ok(h.collection.layers.every((entry) => entry.show));
   const diag = h.layer.getDiagnostics();

@@ -2,6 +2,7 @@ import * as Cesium from 'cesium';
 import { createBomRendering } from './rendering.js';
 import { BOM_RADAR_OFF_MESSAGE, createBomRadarSource } from './source.js';
 import { pickBomProduct, bomRangeLabel } from './select.js';
+import { maskBomFurniture } from './records.js';
 import { imageryHostStatus } from '../weather/imageryHost.js';
 import { decodeInfraredImage } from '../weather/infraredImage.js';
 
@@ -259,7 +260,13 @@ export function createBomRadarLayer({
       const canvas = createCanvas();
       canvas.width = bitmap.width;
       canvas.height = bitmap.height;
-      canvas.getContext('2d').drawImage(bitmap, 0, 0);
+      const context = canvas.getContext('2d');
+      context.drawImage(bitmap, 0, 0);
+      // Both hosts draw this canvas, so the image's own title bar and caption
+      // are hidden once here.
+      const pixels = context.getImageData(0, 0, canvas.width, canvas.height);
+      maskBomFurniture(pixels.data, canvas.width, canvas.height);
+      context.putImageData(pixels, 0, 0);
       return canvas;
     } finally {
       bitmap.close?.();
