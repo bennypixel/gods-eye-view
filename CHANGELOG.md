@@ -15,6 +15,10 @@
   `[object Object]` or interrupt station loading; legacy string names remain
   supported in the globe and bike-share tools. Thanks to
   [Kristóf Kékesi](https://github.com/KristofKekesi) (#61).
+- The right rail ignores panels that other CSS hides, such as during an event
+  view, so they no longer force one-panel-at-a-time layout or collapse visible
+  panels. Panels the rail collapses itself are still restored.
+
 - Coordinate searches refuse empty latitude or longitude components instead of navigating to an unintended location.
 
 - Bing Aerial and Bing Labels request HTTPS tiles on HTTP localhost through
