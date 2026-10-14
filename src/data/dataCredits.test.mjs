@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DATA_CREDITS } from './dataCredits.js';
+import { DATA_CREDITS, NYC_DOT_DISCLAIMER } from './dataCredits.js';
 
 test('every credit carries a unique key and some markup to render', () => {
   const keys = DATA_CREDITS.map((entry) => entry.key);
@@ -138,4 +138,12 @@ test('the Bureau of Meteorology credit is conditional and carries the licence ca
   assert.equal(registerDynamicCredit(viewer, BOM_RADAR_CREDIT), true);
   assert.equal(registerDynamicCredit(viewer, BOM_RADAR_CREDIT), true);
   assert.equal(added.length, 1, 'idempotent per key');
+});
+
+test('the NYC camera credit carries NYC DOT’s requested disclaimer', () => {
+  const credit = DATA_CREDITS.find((entry) => entry.key === 'nyc-cctv');
+  assert.ok(credit, 'NYC DOT camera frames must be credited');
+  assert.ok(credit.html.includes(NYC_DOT_DISCLAIMER));
+  assert.match(credit.html, /make no representation as to the accuracy/);
+  assert.match(credit.html, /observe posted signage/);
 });
