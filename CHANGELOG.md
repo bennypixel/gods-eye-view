@@ -17,6 +17,9 @@
   `[object Object]` or interrupt station loading; legacy string names remain
   supported in the globe and bike-share tools. Thanks to
   [Kristóf Kékesi](https://github.com/KristofKekesi) (#61).
+- Snow flakes sway within a fixed range instead of drifting sideways faster the
+  longer the app runs; the Wind setting still scales the sway.
+
 - The right rail ignores panels that other CSS hides, such as during an event
   view, so they no longer force one-panel-at-a-time layout or collapse visible
   panels. Panels the rail collapses itself are still restored.
