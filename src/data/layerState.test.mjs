@@ -202,8 +202,8 @@ function encode(state) {
 
 test('production registry is exact, canonical, and rejects incomplete contracts', async () => {
   assert.equal(validateLayerStateRegistry(), true);
-  assert.equal(REGISTERED_LAYER_IDS.length, 30);
-  assert.equal(new Set(REGISTERED_LAYER_IDS).size, 30);
+  assert.equal(REGISTERED_LAYER_IDS.length, 31);
+  assert.equal(new Set(REGISTERED_LAYER_IDS).size, 31);
   assert.ok(REGISTERED_LAYER_IDS.includes('transit'));
   assert.deepEqual(REGISTERED_LAYER_IDS, [...REGISTERED_LAYER_IDS].sort());
   assert.deepEqual(LEGACY_LAYER_STATE_TOKENS, {
@@ -348,7 +348,11 @@ test('production registry is exact, canonical, and rejects incomplete contracts'
     () =>
       validateLayerStateAllocations(
         { ...LAYER_STATE_TOKEN_RESERVATIONS, merged: NEXT_A },
-        { ...LAYER_STATE_TOKEN_RESERVATIONS, merged: NEXT_A, competing: NEXT_A },
+        {
+          ...LAYER_STATE_TOKEN_RESERVATIONS,
+          merged: NEXT_A,
+          competing: NEXT_A,
+        },
       ),
     new RegExp(`next free token ${NEXT_B}`),
   );
@@ -2645,6 +2649,23 @@ test('the recent-imagery split is share-link only: never stored locally, and a s
   );
 });
 
+test('GNSS interference uses digit 3 without colliding with other digit tokens', () => {
+  const decoded = decodeLayerStateParams(new URLSearchParams('v=2&l=3.2.1'));
+  assert.deepEqual(decoded.enabledLayerIds, [
+    'fire-perimeters',
+    'gnss-integrity',
+    'recent-imagery',
+  ]);
+  assert.equal(
+    LAYER_STATE_REGISTRY.find(({ id }) => id === 'gnss-integrity').token,
+    '3',
+  );
+  assert.deepEqual(
+    decodeLayerStateParams(new URLSearchParams(encode(decoded))),
+    decoded,
+  );
+});
+
 test('fire perimeters uses digit 2 without colliding with wind or recent imagery', () => {
   const decoded = decodeLayerStateParams(new URLSearchParams('v=2&l=2.k.1'));
   assert.deepEqual(decoded.enabledLayerIds, [
@@ -2655,23 +2676,6 @@ test('fire perimeters uses digit 2 without colliding with wind or recent imagery
   assert.equal(
     LAYER_STATE_REGISTRY.find(({ id }) => id === 'fire-perimeters').token,
     '2',
-  );
-  assert.deepEqual(
-    decodeLayerStateParams(new URLSearchParams(encode(decoded))),
-    decoded,
-  );
-});
-
-test('sa road events uses digit 3 without colliding with other layers', () => {
-  const decoded = decodeLayerStateParams(new URLSearchParams('v=2&l=3.2.k'));
-  assert.deepEqual(decoded.enabledLayerIds, [
-    'fire-perimeters',
-    'sa-road-events',
-    'wind',
-  ]);
-  assert.equal(
-    LAYER_STATE_REGISTRY.find(({ id }) => id === 'sa-road-events').token,
-    '3',
   );
   assert.deepEqual(
     decodeLayerStateParams(new URLSearchParams(encode(decoded))),
@@ -2815,4 +2819,21 @@ test('explicit provider switches reach durable state without adopting unrelated 
   } finally {
     coordinator.destroy();
   }
+});
+
+test('sa road events uses digit 4 without colliding with other layers', () => {
+  const decoded = decodeLayerStateParams(new URLSearchParams('v=2&l=4.2.k'));
+  assert.deepEqual(decoded.enabledLayerIds, [
+    'fire-perimeters',
+    'sa-road-events',
+    'wind',
+  ]);
+  assert.equal(
+    LAYER_STATE_REGISTRY.find(({ id }) => id === 'sa-road-events').token,
+    '4',
+  );
+  assert.deepEqual(
+    decodeLayerStateParams(new URLSearchParams(encode(decoded))),
+    decoded,
+  );
 });

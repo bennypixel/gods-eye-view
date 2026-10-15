@@ -2,6 +2,7 @@ import { createUsgsEarthquakeSource } from '../layers/earthquakes/source.js';
 import { createWfigsPerimeterSource } from '../layers/perimeters/source.js';
 import { createSaRoadEventsSource } from '../layers/saRoadEvents/source.js';
 import { createBundledCableSource } from '../layers/submarineCables/bundledSource.js';
+import { createAdsbGnssSource } from '../layers/gnss/source.js';
 
 /** Construct the existing reference feeds independently of application setup. */
 export function createReferenceSources() {
@@ -10,5 +11,6 @@ export function createReferenceSources() {
     'fire-perimeters': createWfigsPerimeterSource(),
     'sa-road-events': createSaRoadEventsSource(),
     cables: createBundledCableSource(),
+    'gnss-integrity': createAdsbGnssSource(),
   };
 }

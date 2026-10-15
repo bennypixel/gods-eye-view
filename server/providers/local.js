@@ -25,6 +25,7 @@ import { keySetupEndpoint } from '../standalone/key-setup.js';
 import { weatherProxy } from './weather.js';
 import { firePerimetersProxy } from './firePerimeters.js';
 import { saRoadEventsProxy } from './saRoadEvents.js';
+import { gnssIntegrityProxy } from './gnssIntegrity.js';
 import { cycloneProxy } from './cyclones.js';
 import { windProxy } from './wind.js';
 
@@ -62,6 +63,7 @@ function localProviderPlugins({ realtime } = {}) {
     mapillaryProxy(),
     firePerimetersProxy(),
     saRoadEventsProxy(),
+    gnssIntegrityProxy(),
     keySetupEndpoint(),
   ];
 }

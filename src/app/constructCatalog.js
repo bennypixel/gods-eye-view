@@ -26,6 +26,7 @@ import { createApplicationFirms } from './layers/firms.js';
 import { createApplicationEarthquakes } from './layers/earthquakes.js';
 import { createApplicationFirePerimeters } from './layers/perimeters.js';
 import { createApplicationSaRoadEvents } from './layers/saRoadEvents.js';
+import { createApplicationGnssIntegrity } from './layers/gnss.js';
 import { createApplicationCables } from './layers/submarineCables.js';
 import { createApplicationStreetLevel } from './layers/streetLevel.js';
 import { createInfrastructureLayers } from '../data/infrastructure.js';
@@ -123,6 +124,9 @@ export function createApplicationCatalog({
         }),
         createApplicationSaRoadEvents({
           source: sources['sa-road-events'],
+        }),
+        createApplicationGnssIntegrity({
+          source: sources['gnss-integrity'],
         }),
         createApplicationAlpr({ surface, source: sources.alpr }),
         createApplicationStreetLevel({

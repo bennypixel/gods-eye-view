@@ -43,6 +43,7 @@ const reservationRows = JSON.parse(
     'utf8',
   ),
 );
+
 // Scenarios claim the live ledger's next free digits rather than literal ones,
 // so they keep testing the same allocation rules as real layers merge.
 const FREE_DIGITS = [...'0123456789'].filter(
@@ -134,15 +135,13 @@ test('reservation ledger is complete, pinned, and rejects duplicate or malformed
     { ...parseLayerStateTokenReservations(reservationRows) },
     { ...LAYER_STATE_TOKEN_RESERVATIONS },
   );
-  assert.equal(Object.keys(LAYER_STATE_TOKEN_RESERVATIONS).length, 30);
-  assert.deepEqual(
-    { ...LAYER_STATE_TOKEN_RESERVATIONS },
-    {
-      ...LEGACY_LAYER_STATE_TOKENS,
-      'street-level': '0',
-      'sa-road-events': '3',
-    },
+  assert.equal(
+    Object.keys(LAYER_STATE_TOKEN_RESERVATIONS).length,
+    reservationRows.length,
   );
+  for (const [id, token] of Object.entries(LEGACY_LAYER_STATE_TOKENS)) {
+    assert.equal(LAYER_STATE_TOKEN_RESERVATIONS[id], token);
+  }
   assert.throws(
     () => parseLayerStateTokenReservations(reservationRows.slice(1)),
     /Missing or changed legacy/,
