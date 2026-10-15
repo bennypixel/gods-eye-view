@@ -13,6 +13,9 @@
   `[object Object]` or interrupt station loading; legacy string names remain
   supported in the globe and bike-share tools. Thanks to
   [Kristóf Kékesi](https://github.com/KristofKekesi) (#61).
+- Overpass and military-installation disk caches no longer serve answers from a
+  previously configured `OVERPASS_UPSTREAMS` instance after it is repointed.
+
 - A Radio Browser mirror answering 204, 205 or 304, or a status outside
   200–599, no longer crashes the local dev/preview server. Null-body statuses
   get an empty body; anything else that cannot become a response fails that
@@ -57,6 +60,10 @@
 - Recent Imagery continues past malformed records in full catalog pages, respects the requested record limit, and reports results as truncated when that limit drops valid records.
 
 - Regional articles retain unknown publication times when compact source dates do not identify a real calendar instant.
+
+- Add Detroit (MoGo), Pittsburgh (POGOH), Aspen (WE-cycle) and Kona & Hilo
+  (HIBike) to the GBFS bikeshare registry, the layer's first stations in
+  Michigan.
 
 - Treat explicitly current, complete empty vessel coverage as a successful update,
   clearing obsolete contacts while retaining stale or incomplete snapshots.
