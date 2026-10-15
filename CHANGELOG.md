@@ -12,6 +12,11 @@
   snapshot as stale for up to six hours, and uses the identical mirror service
   only if the primary fails. Data: Traffic SA, Department for Infrastructure and
   Transport, Government of South Australia (CC BY 4.0).
+- Flights age out vanished aircraft again. OpenSky's routine position-less rows
+  no longer mark every snapshot partial, which had kept vanished and landed
+  aircraft at full opacity for up to five minutes; those rows retain only their
+  own aircraft, and a likely-landed one still leaves on the landed limit.
+
 - Add WSDOT highway cameras (Washington State) as a keyless CCTV source pack:
   WSDOT's official Travel Center camera layer, with frames registered only on
   WSDOT's own image host (partner-hosted cameras such as Oregon DOT and City of
