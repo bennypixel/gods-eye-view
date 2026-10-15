@@ -44,12 +44,20 @@ const reservationRows = JSON.parse(
   ),
 );
 
-// Scenarios claim the live ledger's next free digits rather than literal ones,
+// Scenarios claim the live ledger's next free tokens rather than literal ones,
 // so they keep testing the same allocation rules as real layers merge.
 const FREE_DIGITS = [...'0123456789'].filter(
   (digit) => !reservationRows.some(([, token]) => token === digit),
 );
-const [NEXT_A, NEXT_B] = FREE_DIGITS;
+// Allocation order: single digits first, then two-character base-36 tokens.
+const [NEXT_A, NEXT_B] = [
+  ...FREE_DIGITS,
+  ...[...LAYER_STATE_TOKEN_ALPHABET].flatMap((first) =>
+    [...LAYER_STATE_TOKEN_ALPHABET].map((second) => `${first}${second}`),
+  ),
+].filter(
+  (token) => !reservationRows.some(([, reserved]) => reserved === token),
+);
 
 test('pre-ledger published ownership is independent of the candidate mapping', () => {
   assert.notStrictEqual(
