@@ -242,12 +242,18 @@ test('production registry is exact, canonical, and rejects incomplete contracts'
   for (const [id, token] of Object.entries(LEGACY_LAYER_STATE_TOKENS)) {
     assert.equal(LAYER_STATE_TOKEN_RESERVATIONS[id], token);
   }
-  // Scenarios below claim the live ledger's next free digits rather than
+  // Scenarios below claim the live ledger's next free tokens rather than
   // literal ones, so they keep testing the same rules as layers merge.
   const reservedTokens = new Set(Object.values(LAYER_STATE_TOKEN_RESERVATIONS));
   const FREE_DIGITS = [...'0123456789'].filter((d) => !reservedTokens.has(d));
-  assert.ok(FREE_DIGITS.length >= 3, 'scenarios need three free digits');
-  const [NEXT_A, NEXT_B, NEXT_C] = FREE_DIGITS;
+  // Allocation order: single digits first, then two-character base-36 tokens.
+  const FREE_TOKENS = [
+    ...FREE_DIGITS,
+    ...[...LAYER_STATE_TOKEN_ALPHABET].flatMap((first) =>
+      [...LAYER_STATE_TOKEN_ALPHABET].map((second) => `${first}${second}`),
+    ),
+  ].filter((token) => !reservedTokens.has(token));
+  const [NEXT_A, NEXT_B, NEXT_C] = FREE_TOKENS;
   assert.equal(nextLayerStateToken(), NEXT_A);
   assert.equal(
     nextLayerStateToken({
