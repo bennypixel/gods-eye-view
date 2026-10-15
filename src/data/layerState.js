@@ -583,6 +583,11 @@ export const LAYER_STATE_TOKEN_RESERVATIONS =
  */
 export const LAYER_STATE_REGISTRY = Object.freeze([
   Object.freeze({
+    id: 'air-quality',
+    token: '4',
+    disposition: 'enabled-only',
+  }),
+  Object.freeze({
     id: 'ais-live-vessels',
     token: 'a',
     disposition: 'enabled-only',
@@ -603,7 +608,7 @@ export const LAYER_STATE_REGISTRY = Object.freeze([
     disposition: 'enabled-only',
   }),
   Object.freeze({ id: 'bikeshare', token: 'b', disposition: 'enabled-only' }),
-  Object.freeze({ id: 'bom-radar', token: '4', disposition: 'enabled-only' }),
+  Object.freeze({ id: 'bom-radar', token: '5', disposition: 'enabled-only' }),
   Object.freeze({
     id: 'cctv',
     token: 'c',
