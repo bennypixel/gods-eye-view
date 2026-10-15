@@ -143,7 +143,12 @@ test('reservation ledger is complete, pinned, and rejects duplicate or malformed
     assert.equal(LAYER_STATE_TOKEN_RESERVATIONS[id], token);
   }
   assert.throws(
-    () => parseLayerStateTokenReservations(reservationRows.slice(1)),
+    () =>
+      parseLayerStateTokenReservations(
+        // Drop a legacy row by id; the first row sorts as air-quality, which
+        // is not a legacy reservation.
+        reservationRows.filter(([id]) => id !== 'ais-live-vessels'),
+      ),
     /Missing or changed legacy/,
   );
   assert.throws(
