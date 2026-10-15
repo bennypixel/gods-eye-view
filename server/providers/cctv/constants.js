@@ -8,8 +8,8 @@ export const DEFAULT_AUSTIN_MAX_SOURCES = 250;
  * Catalog-wide safety ceiling on served cameras. Each pack already caps
  * itself (nearest-to-anchor first); this bound only matters when the packs
  * together exceed it, and it is then filled round-robin across packs (see
- * cap.js) so no region is silently dropped. Sized above the sum of the
- * default per-pack caps so a default install never trims.
+ * cap.js) so no region is silently dropped. The default per-pack caps
+ * together can exceed it, so a default install may be thinned evenly here.
  */
 export const DEFAULT_CCTV_MAX_SOURCES = 4000;
 /** Hard upper bound for CCTV_MAX_SOURCES; also sizes the health map. */
@@ -236,6 +236,56 @@ export const CALGARY_DOWNTOWN = { lat: 51.0461, lon: -114.0626 };
  * body cannot be buffered without limit. */
 export const CALGARY_MAX_CATALOG_BYTES = 4 * 1024 * 1024;
 
+/**
+ * Catalonia traffic cameras (Servei Català de Trànsit): one keyless WFS/GML
+ * XML list (verified 2026-09-15, hourly catalog refresh), fetched over https
+ * (verified 2026-09-27: same 200 body, no redirect). The feed carries a
+ * `font` field naming the actual publisher per camera — SCT's own highway
+ * cameras plus hotlinked Barcelona (IMI) and Terrassa municipal cameras are
+ * kept, each confirmed to return a real frame. Frame URLs are checked
+ * against a host allowlist rather than one pinned origin, since each
+ * publisher serves from its own host.
+ */
+export const CATALONIA_CAMERAS_URL =
+  'https://www.gencat.cat/transit/opendata/cameres.xml';
+/** Byte ceiling for the Catalonia catalog read (~90 KB observed 2026-09-27),
+ * so a runaway body cannot be buffered without limit. */
+export const CATALONIA_MAX_CATALOG_BYTES = 1024 * 1024;
+/** Allowed image hosts, one per kept `font` publisher in the feed, each
+ * mapped to the one directory its frame links live in (every link in the
+ * 2026-10 feed shares it); a link must name a single file directly inside. */
+export const CATALONIA_IMAGE_HOSTS = Object.freeze(
+  new Map([
+    ['mct.gencat.cat', '/mct2bo/'], // SCT
+    ['www.bcn.cat', '/transit/imatges/'], // IMI (Ajuntament de Barcelona)
+    ['emap.terrassa.cat', '/it_terrassa/'], // Ajuntament de Terrassa
+  ]),
+);
+/** SCT `sctidcam` values: a bare image filename, which also keys the camera
+ * id (the feed's `fid` embeds an upstream server-start stamp). */
+export const CATALONIA_SCT_CAMERA_FILE_RE = /^[a-z0-9]+\.(gif|jpe?g)$/i;
+/** Per-`font` partner credit, shown beside the provider in the CCTV panel
+ * (same pattern as DriveBC's partner-supplied cameras). SCT is the feed's
+ * own publisher and carries no separate credit. */
+export const CATALONIA_FONT_CREDIT = Object.freeze({
+  IMI: 'Ajuntament de Barcelona',
+  Terrassa: 'Ajuntament de Terrassa',
+});
+/** Ground-elevation priors in metres, by `font`: the feed carries no
+ * elevation, and this pack spans sea level (Barcelona) to Terrassa's plateau
+ * (~270 m). The client's ground snap corrects these on 3D-tile stacks. */
+export const CATALONIA_FONT_ELEVATION_M = Object.freeze({
+  SCT: 80,
+  IMI: 20,
+  Terrassa: 270,
+});
+export const DEFAULT_CATALONIA_MAX_SOURCES = 150;
+/** Prioritization anchors: Barcelona and Terrassa. */
+export const CATALONIA_ANCHORS = [
+  { lat: 41.3874, lon: 2.1686 }, // Barcelona
+  { lat: 41.5636, lon: 2.0111 }, // Terrassa
+];
+
 /** Statens vegvesen (Norway) road cameras: the keyless OGC API Features view
  * of the official DATEX 3.1 CCTV site table, one GeoJSON request for the whole
  * country (~900 cameras). The raw DATEX node needs an account; this view does
@@ -249,9 +299,9 @@ export const VEGVESEN_IMAGE_ORIGIN =
  * per-camera manifest path is registered. */
 export const VEGVESEN_VIDEO_URL = (cameraId) =>
   `https://kamera.vegvesen.no/public/${cameraId}/manifest.m3u8`;
-/** Above the ~850 working cameras so a default install keeps them all, while
- * staying close to them: the per-pack defaults are meant to sum to no more
- * than DEFAULT_CCTV_MAX_SOURCES. */
+/** Above the ~850 working cameras so the pack keeps them all on its own. The
+ * catalog-wide DEFAULT_CCTV_MAX_SOURCES cap still applies across packs and is
+ * filled round-robin, so a full default install may thin this pack. */
 export const DEFAULT_VEGVESEN_MAX_SOURCES = 900;
 /** Hard ceiling on the catalog body. The whole country is ~800 KB. */
 export const VEGVESEN_MAX_CATALOG_BYTES = 8 * 1024 * 1024;
@@ -361,6 +411,26 @@ export const TORONTO_GROUND_ELEVATION_M = 116;
  * 60 KB; this only exists so an upstream that streams an unbounded body cannot
  * be buffered without limit. */
 export const TORONTO_MAX_CATALOG_BYTES = 4 * 1024 * 1024;
+/** WSDOT Travel Center cameras (Washington State): keyless Esri JSON on the
+ * official open-data host — ~1,700 point features in EPSG:3857 (Web Mercator),
+ * ETag/Last-Modified served. WSDOT's metadata marks the feed "low volume" use;
+ * the catalog is fetched once per CCTV_SOURCE_CACHE_MS refresh. */
+export const WSDOT_CAMERAS_URL =
+  'https://data.wsdot.wa.gov/travelcenter/Cameras.json';
+/** Only frames on WSDOT's own image host are registered; the catalog also
+ * lists ~70 partner cameras (Oregon DOT, City of Seattle, lodges, airports)
+ * whose own terms apply. */
+export const WSDOT_IMAGE_ORIGIN = 'https://images.wsdot.wa.gov/';
+export const DEFAULT_WSDOT_MAX_SOURCES = 250;
+/** Hard ceiling on the WSDOT catalog body. The live layer is ~400 KB; this
+ * only exists so an upstream that streams an unbounded body cannot be
+ * buffered without limit. */
+export const WSDOT_MAX_CATALOG_BYTES = 4 * 1024 * 1024;
+/** Prioritization anchors: downtown Seattle and Spokane. */
+export const WSDOT_ANCHORS = [
+  { lat: 47.6062, lon: -122.3321 }, // Seattle
+  { lat: 47.6588, lon: -117.426 }, // Spokane
+];
 
 /** Camera CATALOGS change rarely; 15 min keeps multi-megabyte upstream list refetches (Austin rows.json + 4 Caltrans districts + TfL + Ontario 511) infrequent. Frames are fetched per-request and are unaffected. */
 export const CCTV_SOURCE_CACHE_MS = 15 * 60 * 1000;
