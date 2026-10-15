@@ -202,8 +202,8 @@ function encode(state) {
 
 test('production registry is exact, canonical, and rejects incomplete contracts', async () => {
   assert.equal(validateLayerStateRegistry(), true);
-  assert.equal(REGISTERED_LAYER_IDS.length, 31);
-  assert.equal(new Set(REGISTERED_LAYER_IDS).size, 31);
+  assert.equal(REGISTERED_LAYER_IDS.length, 32);
+  assert.equal(new Set(REGISTERED_LAYER_IDS).size, 32);
   assert.ok(REGISTERED_LAYER_IDS.includes('transit'));
   assert.deepEqual(REGISTERED_LAYER_IDS, [...REGISTERED_LAYER_IDS].sort());
   assert.deepEqual(LEGACY_LAYER_STATE_TOKENS, {
@@ -2869,8 +2869,8 @@ test('explicit provider switches reach durable state without adopting unrelated 
   }
 });
 
-test('sa road events uses digit 4 without colliding with other layers', () => {
-  const decoded = decodeLayerStateParams(new URLSearchParams('v=2&l=4.2.k'));
+test('sa road events uses digit 5 without colliding with other layers', () => {
+  const decoded = decodeLayerStateParams(new URLSearchParams('v=2&l=5.2.k'));
   assert.deepEqual(decoded.enabledLayerIds, [
     'fire-perimeters',
     'sa-road-events',
@@ -2878,7 +2878,7 @@ test('sa road events uses digit 4 without colliding with other layers', () => {
   ]);
   assert.equal(
     LAYER_STATE_REGISTRY.find(({ id }) => id === 'sa-road-events').token,
-    '4',
+    '5',
   );
   assert.deepEqual(
     decodeLayerStateParams(new URLSearchParams(encode(decoded))),

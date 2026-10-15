@@ -1,4 +1,5 @@
 [
+  ["air-quality", "4"],
   ["ais-live-vessels", "a"],
   ["alpr-cameras", "p"],
   ["bhote-koshi-2026", "h"],
@@ -19,7 +20,7 @@
   ["radio", "r"],
   ["recent-imagery", "1"],
   ["rocket-launches", "x"],
-  ["sa-road-events", "4"],
+  ["sa-road-events", "5"],
   ["satellites", "s"],
   ["street-level", "0"],
   ["telegeography-submarine-cables", "u"],
