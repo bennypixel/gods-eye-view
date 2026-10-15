@@ -55,6 +55,7 @@ const PANEL_GROUPS = [
       'local-firms',
       'fire-perimeters',
       'sa-fire-incidents',
+      'gnss-integrity',
     ],
   },
   {

@@ -202,8 +202,8 @@ function encode(state) {
 
 test('production registry is exact, canonical, and rejects incomplete contracts', async () => {
   assert.equal(validateLayerStateRegistry(), true);
-  assert.equal(REGISTERED_LAYER_IDS.length, 30);
-  assert.equal(new Set(REGISTERED_LAYER_IDS).size, 30);
+  assert.equal(REGISTERED_LAYER_IDS.length, 31);
+  assert.equal(new Set(REGISTERED_LAYER_IDS).size, 31);
   assert.ok(REGISTERED_LAYER_IDS.includes('transit'));
   assert.deepEqual(REGISTERED_LAYER_IDS, [...REGISTERED_LAYER_IDS].sort());
   assert.deepEqual(LEGACY_LAYER_STATE_TOKENS, {
@@ -2646,6 +2646,23 @@ test('the recent-imagery split is share-link only: never stored locally, and a s
   assert.equal(
     parseStoredLayerState(previous).options['recent-imagery'].split,
     50,
+  );
+});
+
+test('GNSS interference uses digit 3 without colliding with other digit tokens', () => {
+  const decoded = decodeLayerStateParams(new URLSearchParams('v=2&l=3.2.1'));
+  assert.deepEqual(decoded.enabledLayerIds, [
+    'fire-perimeters',
+    'gnss-integrity',
+    'recent-imagery',
+  ]);
+  assert.equal(
+    LAYER_STATE_REGISTRY.find(({ id }) => id === 'gnss-integrity').token,
+    '3',
+  );
+  assert.deepEqual(
+    decodeLayerStateParams(new URLSearchParams(encode(decoded))),
+    decoded,
   );
 });
 
