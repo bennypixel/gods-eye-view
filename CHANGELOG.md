@@ -12,6 +12,15 @@
   snapshot as stale for up to six hours, and uses the identical mirror service
   only if the primary fails. Data: Traffic SA, Department for Infrastructure and
   Transport, Government of South Australia (CC BY 4.0).
+- CCTV cameras with identified hardware show the model's datasheet specs. When a
+  source names a camera model found in the vendored CCTV Camera Database records
+  (CC0), the HUD meta line adds its resolution, night vision and PTZ capability.
+  A fixed single-lens model's horizontal FOV fills in when the source states no
+  FOV and the pose is not curated (`FOV n° (DATASHEET)`); a PTZ or varifocal
+  range is what the lens can do, not its current zoom, so those cameras keep the
+  estimate and show `SPEC FOV min–max° (CAPABILITY)` beside it (bassem chagra,
+  #452).
+
 - Ship a web app manifest and raster home-screen icons, so adding the app to a
   phone home screen or installing it on desktop uses the God's Eye View mark
   instead of a blank tile. The icons are generated from `public/logo.svg` by
@@ -93,6 +102,11 @@
   Dropped CoGo (Columbus) and Broward B-cycle (Fort Lauderdale), whose systems
   have wound down — CoGo's feed reports no stations and last moved a bike in
   March 2025. The three repointed feeds were verified live.
+
+- Add seven Brazilian Bike Itaú (Tembici) cities to the GBFS bikeshare registry:
+  São Paulo, Rio de Janeiro, Salvador, Recife, Porto Alegre, Brasília and
+  Curitiba (about 1,000 stations in total). These are the layer's first stations
+  in South America.
 
 - Add Bike Share Toronto (1,069 stations) to the bikeshare registry. The system
   publishes the same PBSC GBFS v2 feeds as the Austin, Honolulu and Chattanooga
