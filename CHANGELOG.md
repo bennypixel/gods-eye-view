@@ -10,6 +10,11 @@
   in-memory cache and never writes imagery to disk. The nearest radar and a
   range suited to the camera altitude are chosen from each radar's `.map`
   georeferencing; it draws on globe maps and on Google 3D Tiles.
+- Cyclone advisories no longer go dark while NHC publishes an advisory ahead
+  of its nominal time: advisory and position times up to 90 minutes ahead of
+  the server clock are accepted (previously 5 minutes), so the whole feed is
+  not rejected for about half an hour each advisory cycle.
+
 - Flights age out vanished aircraft again. OpenSky's routine position-less rows
   no longer mark every snapshot partial, which had kept vanished and landed
   aircraft at full opacity for up to five minutes; those rows retain only their
