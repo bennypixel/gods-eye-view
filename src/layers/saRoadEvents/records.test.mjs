@@ -355,6 +355,99 @@ test('lines with out-of-state, malformed or too-short geometry are skipped', () 
   assert.equal(skipped, 5);
 });
 
+// Thinning only decides which vertices are drawn; every source vertex is still
+// checked, so a bad point the stride skips cannot ride in with a good line.
+test('line admission checks every source vertex, not just the thinned ones', () => {
+  const longLine = (mutate) => {
+    const coordinates = Array.from({ length: 5000 }, (_, i) => [
+      138 + i / 100000,
+      -34.5,
+    ]);
+    mutate(coordinates);
+    return coordinates;
+  };
+  const only = (properties, geometry) =>
+    normalizeSaRoadEventLines(collection([line(properties, geometry)]));
+  const lineString = (coordinates) => ({ type: 'LineString', coordinates });
+
+  // 5,000 points thin with stride 6, so indexes 1-5 are never sampled.
+  assert.equal(
+    only(
+      { LOCATION_ID: 'thinning-repro', PLOT_TYPE: 'RD_CLOSURE' },
+      lineString(
+        longLine((points) => {
+          points[1] = [151, -34.5];
+        }),
+      ),
+    ),
+    null,
+    'an out-of-state vertex between sampled ones is not silently dropped',
+  );
+  for (const [name, bad] of [
+    ['NaN', [Number.NaN, -34.5]],
+    ['null', null],
+    ['a numeric-string longitude', ['138.5', -34.5]],
+    ['a missing latitude', [138.5]],
+  ])
+    assert.equal(
+      only(
+        {},
+        lineString(
+          longLine((points) => {
+            points[2] = bad;
+          }),
+        ),
+      ),
+      null,
+      `${name} at an unsampled index rejects the line`,
+    );
+
+  assert.equal(
+    only(
+      {},
+      {
+        type: 'MultiLineString',
+        coordinates: [
+          longLine(() => {}),
+          longLine((points) => {
+            points[3] = [151, -34.5];
+          }),
+        ],
+      },
+    ),
+    null,
+    'corruption in a later part of a MultiLineString is rejected',
+  );
+
+  // Controls: valid geometry still normalises, and the vertex cap is unchanged.
+  const single = only({}, lineString(longLine(() => {})));
+  assert.equal(single.records.length, 1);
+  assert.ok(
+    single.records[0].lines[0].length <=
+      SA_ROAD_EVENT_LIMITS.maxLineVertices + 1,
+  );
+  const multi = only(
+    {},
+    {
+      type: 'MultiLineString',
+      coordinates: [longLine(() => {}), longLine(() => {})],
+    },
+  );
+  assert.equal(multi.records[0].lines.length, 2);
+  // A bad vertex on a sampled index (0, 6, 12, ...) is still rejected.
+  assert.equal(
+    only(
+      {},
+      lineString(
+        longLine((points) => {
+          points[6] = [151, -34.5];
+        }),
+      ),
+    ),
+    null,
+  );
+});
+
 test('validatePayload accepts a proxy-shaped body and refuses anything malformed', () => {
   const points = normalizeSaRoadEventPoints(pointsFixture).records;
   const lines = normalizeSaRoadEventLines(linesFixture).records;

@@ -231,7 +231,9 @@ function normalizeLineGeometry(geometry, budget) {
     // Thinning keeps the first and last vertex so the closure still joins up.
     if (line[line.length - 1] !== part[part.length - 1])
       line.push(part[part.length - 1]);
-    for (const position of line) {
+    // Thinning picks what is drawn, not what is trusted: every source vertex
+    // must be a finite in-state position, including the ones the stride skips.
+    for (const position of part) {
       if (!Array.isArray(position) || !inSaBounds(position[0], position[1]))
         return null;
     }
