@@ -2987,11 +2987,18 @@
     "many": "{count} дорожных работ скрыто; включите показ кнопками",
     "other": "{count} дорожной работы скрыто; включите показ кнопками"
   },
-  "Served from the Traffic SA mirror service": "Данные получены с зеркального сервиса Traffic SA",
   "Last refresh failed; showing the previous data": "Последнее обновление не удалось; показаны прежние данные",
   "24 H WORKS": "РАБОТЫ 24 Ч",
   "Show or hide roadworks that run around the clock (hidden by default)": "Показать или скрыть круглосуточные дорожные работы (по умолчанию скрыты)",
   "ROADWORKS": "ДОРОЖНЫЕ РАБОТЫ",
   "Show or hide long-term roadworks (hidden by default)": "Показать или скрыть долгосрочные дорожные работы (по умолчанию скрыты)",
-  "Roadworks, incidents and closures: Traffic SA, Department for Infrastructure and Transport, Government of South Australia (CC BY 4.0). The time is when the proxy last read the feed, not when each event was entered.": "Дорожные работы, происшествия и перекрытия: Traffic SA, Department for Infrastructure and Transport, правительство Южной Австралии (CC BY 4.0). Время — момент последнего чтения потока прокси-сервером, а не ввода каждого события."
+  "Roadworks, incidents and closures: Traffic SA, Department for Infrastructure and Transport, Government of South Australia (CC BY 4.0). The time is when the proxy last read the feed, not when each event was entered.": "Дорожные работы, происшествия и перекрытия: Traffic SA, Department for Infrastructure and Transport, правительство Южной Австралии (CC BY 4.0). Время — момент последнего чтения потока прокси-сервером, а не ввода каждого события.",
+  "Collision": "Столкновение",
+  "Flooding": "Подтопление",
+  "Emergency waterworks": "Аварийные работы на водопроводе",
+  "Incidents and closures unavailable": "Происшествия и перекрытия недоступны",
+  "Incidents unavailable": "Происшествия недоступны",
+  "Closures and detours unavailable": "Перекрытия и объезды недоступны",
+  "Roadworks unavailable": "Дорожные работы недоступны",
+  "Roadworks served from the Traffic SA mirror service": "Данные о дорожных работах получены с зеркального сервиса Traffic SA"
 }

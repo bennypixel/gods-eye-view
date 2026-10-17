@@ -15,14 +15,18 @@ export { createSaRoadEventsSource } from './source.js';
 export const SA_ROAD_EVENTS_LAYER_ID = 'sa-road-events';
 
 /**
- * Point kinds shown until the user changes the row chips. Incidents stay on;
- * both roadworks kinds ("24HR ROADWORKS" is ~90% of the feed) are off so they
- * do not drown the rest, and their row chips show how many are hidden.
+ * Point kinds shown until the user changes the row chips. The incident-class
+ * kinds (incident, collision, flooding, emergency waterworks) stay on; both
+ * roadworks kinds ("24HR ROADWORKS" is ~90% of the feed) are off so they do
+ * not drown the rest, and their row chips show how many are hidden.
  * Unrecognised kinds stay visible so a new upstream category is never silently
  * hidden. Closures and detours (lines) are always shown.
  */
 export const SA_ROAD_EVENT_DEFAULT_VISIBLE_KINDS = Object.freeze([
   'incident',
+  'collision',
+  'flooding',
+  'waterworks',
   'unknown',
 ]);
 
@@ -34,6 +38,9 @@ const CARD_HOST_OPTIONS = Object.freeze({
 });
 const MARKER_PIXELS = Object.freeze({
   incident: 13,
+  collision: 13,
+  flooding: 13,
+  waterworks: 13,
   works24: 8,
   works: 7,
   unknown: 7,
@@ -41,13 +48,31 @@ const MARKER_PIXELS = Object.freeze({
 const SELECTED_EXTRA_PIXELS = 5;
 const LEGEND_ORDER = [
   'incident',
+  'collision',
+  'flooding',
+  'waterworks',
   'closure',
   'detour',
   'works24',
   'works',
   'unknown',
 ];
-const POINT_KINDS = new Set(['incident', 'works24', 'works', 'unknown']);
+// Legend entries that appear only while the feed actually carries them.
+const LEGEND_WHEN_PRESENT = new Set([
+  'collision',
+  'flooding',
+  'waterworks',
+  'unknown',
+]);
+const POINT_KINDS = new Set([
+  'incident',
+  'collision',
+  'flooding',
+  'waterworks',
+  'works24',
+  'works',
+  'unknown',
+]);
 
 /**
  * Resolve a pick id to this layer's record key (`point:<id>` / `line:<id>`),
@@ -371,6 +396,7 @@ export function createSaRoadEventsLayer({
           fetchedAt: snapshot.fetchedAt,
           stale: snapshot.stale,
           mirror: snapshot.mirror,
+          sources: snapshot.sources,
         };
         if (_selectedKey) publishSelectedCard();
         _lastUpdate = Date.now();
@@ -443,7 +469,7 @@ export function createSaRoadEventsLayer({
       for (const { record } of _lines.values())
         counts.set(record.kind, (counts.get(record.kind) || 0) + 1);
       const legend = LEGEND_ORDER.filter(
-        (kind) => kind !== 'unknown' || counts.get('unknown'),
+        (kind) => !LEGEND_WHEN_PRESENT.has(kind) || counts.get(kind),
       ).map((kind, index) => ({
         label: t(SA_ROAD_EVENT_KIND_LABELS[kind]),
         color: roadEventColor(kind),
@@ -466,7 +492,21 @@ export function createSaRoadEventsLayer({
           ? feedUpdatedText(_feed.fetchedAt, _feed.stale)
           : t('Waiting for Traffic SA'),
       ];
-      if (_feed && !visibleCount())
+      // A group the proxy could not serve is not "nothing happening".
+      const unavailable = (group) =>
+        _feed?.sources?.[group]?.status === 'unavailable';
+      if (unavailable('incidents') && unavailable('closures'))
+        info.push(t('Incidents and closures unavailable'));
+      else if (unavailable('incidents')) info.push(t('Incidents unavailable'));
+      else if (unavailable('closures'))
+        info.push(t('Closures and detours unavailable'));
+      if (unavailable('roadworks')) info.push(t('Roadworks unavailable'));
+      if (
+        _feed &&
+        !visibleCount() &&
+        !unavailable('incidents') &&
+        !unavailable('closures')
+      )
         info.push(t('No incidents or closures reported right now'));
       if (hiddenWorks)
         info.push(
@@ -478,7 +518,7 @@ export function createSaRoadEventsLayer({
           ),
         );
       if (_feed?.mirror)
-        info.push(t('Served from the Traffic SA mirror service'));
+        info.push(t('Roadworks served from the Traffic SA mirror service'));
       if (_lastError)
         info.push(
           _feed

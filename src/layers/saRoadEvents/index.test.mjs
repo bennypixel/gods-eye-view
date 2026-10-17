@@ -142,6 +142,9 @@ test('a disabled layer never fetches; enabled, it renders and reports stats', as
 test('incidents and closures show by default; both roadworks kinds do not', async () => {
   assert.deepEqual(SA_ROAD_EVENT_DEFAULT_VISIBLE_KINDS, [
     'incident',
+    'collision',
+    'flooding',
+    'waterworks',
     'unknown',
   ]);
   const h = harness([snapshot()]);
@@ -186,6 +189,141 @@ test('an empty-looking default reads as quiet, not as an outage', async () => {
   assert.match(info, /roadworks hidden/);
   assert.doesNotMatch(info, /unavailable|failed/i);
   assert.equal(h.layer.getStats().error, null);
+});
+
+const liveSources = (overrides = {}) => ({
+  roadworks: { status: 'live', fetchedAt: FEED, mirror: false },
+  incidents: { status: 'live', fetchedAt: FEED, mirror: false },
+  closures: { status: 'live', fetchedAt: FEED, mirror: false },
+  ...overrides,
+});
+const unavailable = { status: 'unavailable', fetchedAt: null, mirror: false };
+const geohubIncidents = normalizeSaRoadEventPoints(
+  fixture('trafficsa-geohub-incidents.json'),
+  { source: 'incidents' },
+).records;
+const geohubClosures = normalizeSaRoadEventLines(
+  fixture('trafficsa-geohub-closures.json'),
+).records;
+const roadworksOnly = points.filter((p) => p.kind.startsWith('works'));
+
+test('collision, flooding and waterworks are shown by default and get their own legend rows', async () => {
+  for (const kind of ['collision', 'flooding', 'waterworks'])
+    assert.ok(SA_ROAD_EVENT_DEFAULT_VISIBLE_KINDS.includes(kind), kind);
+  const h = harness([
+    snapshot({
+      points: [...roadworksOnly, ...geohubIncidents],
+      lines: geohubClosures,
+    }),
+  ]);
+  h.layer.enable();
+  await h.layer.update();
+  assert.equal(
+    h.layer.getDiagnostics().shownPoints,
+    geohubIncidents.length,
+    'every incident-class kind is on, both roadworks kinds are off',
+  );
+  const { legend } = h.layer.getRowControls();
+  const count = (label) => legend.find((row) => row.label === label)?.count;
+  assert.equal(count('Collision'), 1);
+  assert.equal(count('Flooding'), 1);
+  assert.equal(count('Emergency waterworks'), 1);
+  assert.equal(
+    count('Incident'),
+    geohubIncidents.filter((p) => p.kind === 'incident').length,
+  );
+  assert.equal(count('Road closure'), 4);
+  assert.equal(count('Detour'), 2);
+  assert.equal(legend[0].label, 'Incident', 'the blurb stays on the first row');
+  assert.ok(legend[0].blurb);
+  assert.equal(
+    new Set(legend.map((row) => row.color)).size,
+    legend.filter((row) => row.label !== 'Road closure').length,
+    'incident-class kinds are told apart by colour (a closure shares incident red)',
+  );
+  const colors = h
+    .entities()
+    .filter((e) => e.id.startsWith('sa-road-event:point:inc-'))
+    .map((e) => e.point.color.getValue(now()).toCssHexString());
+  assert.ok(new Set(colors).size >= 4);
+  assert.equal(
+    h.layer.getAnalystRecords().filter((r) => r.kind === 'collision').length,
+    1,
+  );
+});
+
+test('an incident/closure outage is stated, never read as a quiet network', async () => {
+  const h = harness([
+    snapshot({
+      points: roadworksOnly,
+      lines: [],
+      sources: liveSources({ incidents: unavailable, closures: unavailable }),
+    }),
+  ]);
+  h.layer.enable();
+  await h.layer.update();
+  const { info } = h.layer.getRowControls();
+  assert.match(info, /Incidents and closures unavailable/);
+  assert.doesNotMatch(info, /No incidents or closures reported/);
+  assert.match(info, /roadworks hidden/, 'roadworks still show');
+  assert.equal(h.layer.getStats().error, null, 'the layer itself is up');
+
+  const incidentsOnly = harness([
+    snapshot({
+      points: roadworksOnly,
+      lines: geohubClosures,
+      sources: liveSources({ incidents: unavailable }),
+    }),
+  ]);
+  incidentsOnly.layer.enable();
+  await incidentsOnly.layer.update();
+  const only = incidentsOnly.layer.getRowControls().info;
+  assert.match(only, /Incidents unavailable/);
+  assert.doesNotMatch(only, /Closures/);
+
+  const closuresOnly = harness([
+    snapshot({
+      points: [...roadworksOnly, ...geohubIncidents],
+      lines: [],
+      sources: liveSources({ closures: unavailable }),
+    }),
+  ]);
+  closuresOnly.layer.enable();
+  await closuresOnly.layer.update();
+  assert.match(
+    closuresOnly.layer.getRowControls().info,
+    /Closures and detours unavailable/,
+  );
+
+  const noRoadworks = harness([
+    snapshot({
+      points: geohubIncidents,
+      lines: geohubClosures,
+      sources: liveSources({ roadworks: unavailable }),
+    }),
+  ]);
+  noRoadworks.layer.enable();
+  await noRoadworks.layer.update();
+  const roadworksInfo = noRoadworks.layer.getRowControls().info;
+  assert.match(roadworksInfo, /Roadworks unavailable/);
+  assert.doesNotMatch(roadworksInfo, /roadworks hidden/);
+});
+
+test('only the roadworks group is described as coming from the mirror', async () => {
+  const h = harness([
+    snapshot({
+      mirror: true,
+      sources: liveSources({
+        roadworks: { status: 'live', fetchedAt: FEED, mirror: true },
+      }),
+    }),
+  ]);
+  h.layer.enable();
+  await h.layer.update();
+  assert.match(
+    h.layer.getRowControls().info,
+    /Roadworks served from the Traffic SA mirror service/,
+  );
 });
 
 test('markers are ground-clamped, kind-coloured and never depth-tested away', async () => {

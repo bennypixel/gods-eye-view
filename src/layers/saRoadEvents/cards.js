@@ -11,6 +11,9 @@ export const SA_ROAD_EVENTS_TIME_ZONE = 'Australia/Adelaide';
 
 const KIND_COLORS = Object.freeze({
   incident: '#ff3b30',
+  collision: '#ff2d78',
+  flooding: '#2f9bff',
+  waterworks: '#18c5b1',
   works24: '#ffab00',
   works: '#e6d04a',
   closure: '#ff3b30',
@@ -24,6 +27,9 @@ const KIND_COLORS = Object.freeze({
  */
 export const SA_ROAD_EVENT_KIND_LABELS = Object.freeze({
   incident: msg('Incident'),
+  collision: msg('Collision'),
+  flooding: msg('Flooding'),
+  waterworks: msg('Emergency waterworks'),
   closure: msg('Road closure'),
   detour: msg('Detour'),
   works24: msg('24 h roadworks'),
@@ -34,8 +40,9 @@ export const SA_ROAD_EVENT_KIND_LABELS = Object.freeze({
 /**
  * Colour for a road-event kind (point or line), as a CSS hex string.
  * @param {string} kind - A point or line kind from records.js.
- * @returns {string} Incident red, 24 h roadworks amber, roadworks yellow,
- *   closure red, detour violet, anything else grey.
+ * @returns {string} Incident red, collision pink, flooding blue, emergency
+ *   waterworks teal, 24 h roadworks amber, roadworks yellow, closure red,
+ *   detour violet, anything else grey.
  */
 export function roadEventColor(kind) {
   return KIND_COLORS[kind] || KIND_COLORS.unknown;
