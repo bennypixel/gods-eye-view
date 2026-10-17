@@ -1,4 +1,5 @@
 import * as Cesium from 'cesium';
+import { formatNumber, msg, t, tn } from '../../i18n/index.js';
 import {
   SA_ROAD_EVENTS_OVERLAY_SOURCE_ID,
   SA_ROAD_EVENT_KIND_LABELS,
@@ -382,7 +383,7 @@ export function createSaRoadEventsLayer({
           return false;
         // Keep the previous entities: a failed refresh never blanks the map.
         console.warn('[Data:SaRoadEvents] Fetch error:', error);
-        _lastError = error?.message || 'Traffic SA unavailable';
+        _lastError = error?.message || msg('Traffic SA unavailable');
         notify();
         return false;
       } finally {
@@ -444,65 +445,71 @@ export function createSaRoadEventsLayer({
       const legend = LEGEND_ORDER.filter(
         (kind) => kind !== 'unknown' || counts.get('unknown'),
       ).map((kind, index) => ({
-        label: SA_ROAD_EVENT_KIND_LABELS[kind],
+        label: t(SA_ROAD_EVENT_KIND_LABELS[kind]),
         color: roadEventColor(kind),
         count: counts.get(kind) || 0,
         ...(index === 0
           ? {
-              blurb:
+              blurb: t(
                 'Live Traffic SA incidents, closures, detours and roadworks. Click an event for details. Roadworks (both kinds) are hidden until switched on with the chips.',
+              ),
             }
           : {}),
       }));
       const chipLabel = (text, kind) =>
-        counts.get(kind)
-          ? text + ' · ' + counts.get(kind).toLocaleString('en-AU')
-          : text;
+        counts.get(kind) ? `${text} · ${formatNumber(counts.get(kind))}` : text;
       const hiddenWorks = ['works24', 'works']
         .filter((kind) => !_visibleKinds.has(kind))
         .reduce((sum, kind) => sum + (counts.get(kind) || 0), 0);
       const info = [
         _feed
           ? feedUpdatedText(_feed.fetchedAt, _feed.stale)
-          : 'Waiting for Traffic SA',
+          : t('Waiting for Traffic SA'),
       ];
       if (_feed && !visibleCount())
-        info.push('No incidents or closures reported right now');
+        info.push(t('No incidents or closures reported right now'));
       if (hiddenWorks)
         info.push(
-          hiddenWorks.toLocaleString('en-AU') +
-            ' roadworks hidden; use the chips to show them',
+          tn(
+            hiddenWorks,
+            '{count} roadwork hidden; use the chips to show them',
+            '{count} roadworks hidden; use the chips to show them',
+            { count: formatNumber(hiddenWorks) },
+          ),
         );
-      if (_feed?.mirror) info.push('Served from the Traffic SA mirror service');
+      if (_feed?.mirror)
+        info.push(t('Served from the Traffic SA mirror service'));
       if (_lastError)
         info.push(
           _feed
-            ? 'Last refresh failed; showing the previous data'
-            : 'Traffic SA unavailable',
+            ? t('Last refresh failed; showing the previous data')
+            : t('Traffic SA unavailable'),
         );
       return {
         chips: [
           {
             id: 'works24',
-            label: chipLabel('24 H WORKS', 'works24'),
+            label: chipLabel(t('24 H WORKS'), 'works24'),
             active: _visibleKinds.has('works24'),
-            title:
+            title: t(
               'Show or hide roadworks that run around the clock (hidden by default)',
+            ),
             onClick: () =>
               setKindVisible('works24', !_visibleKinds.has('works24')),
           },
           {
             id: 'works',
-            label: chipLabel('ROADWORKS', 'works'),
+            label: chipLabel(t('ROADWORKS'), 'works'),
             active: _visibleKinds.has('works'),
-            title: 'Show or hide long-term roadworks (hidden by default)',
+            title: t('Show or hide long-term roadworks (hidden by default)'),
             onClick: () => setKindVisible('works', !_visibleKinds.has('works')),
           },
         ],
         legend,
         info: info.join(' · '),
-        infoTitle:
+        infoTitle: t(
           'Roadworks, incidents and closures: Traffic SA, Department for Infrastructure and Transport, Government of South Australia (CC BY 4.0). The time is when the proxy last read the feed, not when each event was entered.',
+        ),
       };
     },
 

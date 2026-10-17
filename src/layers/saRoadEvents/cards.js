@@ -4,6 +4,7 @@
  * Cesium types, and nothing here builds markup: the overlay host draws every
  * line as text, so upstream strings are never interpreted as HTML.
  */
+import { msg, t } from '../../i18n/index.js';
 
 export const SA_ROAD_EVENTS_OVERLAY_SOURCE_ID = 'sa-road-events';
 export const SA_ROAD_EVENTS_TIME_ZONE = 'Australia/Adelaide';
@@ -17,14 +18,17 @@ const KIND_COLORS = Object.freeze({
   unknown: '#9aa4ad',
 });
 
-/** Display labels per kind, in legend order (most urgent first). */
+/**
+ * English display labels per kind, in legend order (most urgent first). They
+ * are `msg()` keys: pass one through `t()` where it is shown.
+ */
 export const SA_ROAD_EVENT_KIND_LABELS = Object.freeze({
-  incident: 'Incident',
-  closure: 'Road closure',
-  detour: 'Detour',
-  works24: '24 h roadworks',
-  works: 'Roadworks',
-  unknown: 'Other',
+  incident: msg('Incident'),
+  closure: msg('Road closure'),
+  detour: msg('Detour'),
+  works24: msg('24 h roadworks'),
+  works: msg('Roadworks'),
+  unknown: msg('Other'),
 });
 
 /**
@@ -150,7 +154,7 @@ const clip = (value, limit) =>
 
 function speedText(value) {
   if (!value) return null;
-  return /^\d{1,3}$/.test(value) ? `${value} km/h` : value;
+  return /^\d{1,3}$/.test(value) ? t('{speed} km/h', { speed: value }) : value;
 }
 
 function streetList(names, suburb) {
@@ -163,16 +167,18 @@ function timingLines(record, nowMs) {
   const lines = [];
   const start = formatAdelaideDateTime(record.startMs, nowMs);
   const end = formatAdelaideDateTime(record.endMs, nowMs);
-  if (start) lines.push(`Start: ${start}`);
-  lines.push(`End: ${end || 'not published'}`);
+  if (start) lines.push(t('Start: {time}', { time: start }));
+  lines.push(t('End: {time}', { time: end || t('not published') }));
   return lines;
 }
 
 /** "Feed updated 14:20 ACDT", flagged when the proxy is serving old data. */
 export function feedUpdatedText(feedUpdatedMs, stale = false) {
   const clock = formatAdelaideClock(feedUpdatedMs);
-  if (!clock) return 'Feed time unavailable';
-  return `Feed updated ${clock}${stale ? ' · STALE, source unreachable' : ''}`;
+  if (!clock) return t('Feed time unavailable');
+  return stale
+    ? t('Feed updated {time} · STALE, source unreachable', { time: clock })
+    : t('Feed updated {time}', { time: clock });
 }
 
 function pointDetails(record, nowMs) {
@@ -180,16 +186,21 @@ function pointDetails(record, nowMs) {
   if (record.description) details.push(clip(record.description, 300));
   const where = [
     record.road && record.sideStreet
-      ? `${record.road} at ${record.sideStreet}`
+      ? t('{road} at {sideStreet}', {
+          road: record.road,
+          sideStreet: record.sideStreet,
+        })
       : record.road || record.sideStreet,
     record.suburb,
   ].filter(Boolean);
   if (where.length) details.push(where.join(' · '));
   const traffic = [];
-  if (record.direction) traffic.push(`Direction: ${record.direction}`);
-  if (record.lanesClosed) traffic.push(`Lanes closed: ${record.lanesClosed}`);
+  if (record.direction)
+    traffic.push(t('Direction: {direction}', { direction: record.direction }));
+  if (record.lanesClosed)
+    traffic.push(t('Lanes closed: {lanes}', { lanes: record.lanesClosed }));
   const speed = speedText(record.speedLimit);
-  if (speed) traffic.push(`Speed limit: ${speed}`);
+  if (speed) traffic.push(t('Speed limit: {speed}', { speed }));
   if (traffic.length) details.push(traffic.join(' · '));
   details.push(...timingLines(record, nowMs));
   return details;
@@ -201,8 +212,8 @@ function lineDetails(record, nowMs) {
   if (record.road) details.push(record.road);
   const from = streetList(record.startStreets, record.startSuburb);
   const to = streetList(record.endStreets, record.endSuburb);
-  if (from && to) details.push(`From ${from} to ${to}`);
-  else if (from || to) details.push(`At ${from || to}`);
+  if (from && to) details.push(t('From {from} to {to}', { from, to }));
+  else if (from || to) details.push(t('At {place}', { place: from || to }));
   details.push(...timingLines(record, nowMs));
   return details;
 }
@@ -220,7 +231,9 @@ export function buildSaRoadEventCard(
   { nowMs = Date.now(), feedUpdatedMs = null, stale = false } = {},
 ) {
   const isLine = Array.isArray(record.lines);
-  const label = SA_ROAD_EVENT_KIND_LABELS[record.kind] || 'Other';
+  const label = t(
+    SA_ROAD_EVENT_KIND_LABELS[record.kind] || SA_ROAD_EVENT_KIND_LABELS.unknown,
+  );
   const place = isLine
     ? record.road
     : record.road || record.sideStreet || record.suburb;
@@ -235,7 +248,7 @@ export function buildSaRoadEventCard(
     details.push('…');
   }
   const title = clip(
-    `${label.toUpperCase()} · ${place || 'South Australia'}`,
+    `${label.toUpperCase()} · ${place || t('South Australia')}`,
     CARD_LINE_CHARS,
   );
   return {
