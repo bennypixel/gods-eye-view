@@ -3,12 +3,15 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   SA_ROAD_EVENT_LIMITS,
+  SA_ROAD_POINT_KINDS,
+  SA_ROAD_WORKS_KINDS,
   adelaideWallClockToInstant,
   cleanText,
   lineKind,
   normalizeSaRoadEventLines,
   normalizeSaRoadEventPoints,
   normalizeSaRoadEventSnapshot,
+  parseTrafficDirection,
   pointKind,
   validateSaRoadEventsPayload,
 } from './records.js';
@@ -101,7 +104,7 @@ test('REC_TYPE and PLOT_TYPE map to kinds; anything new is unknown', () => {
   assert.equal(pointKind('INCIDENT'), 'incident');
   assert.equal(pointKind(' 24hr roadworks '), 'works24');
   assert.equal(pointKind('ROADWORKS'), 'works');
-  assert.equal(pointKind('FLOODING'), 'unknown');
+  assert.equal(pointKind('HAZARD'), 'unknown');
   assert.equal(pointKind(null), 'unknown');
   assert.equal(lineKind('RD_CLOSURE'), 'closure');
   assert.equal(lineKind('RD_DETOUR'), 'detour');
@@ -280,6 +283,7 @@ test('a collection with rows but no usable row is a failure; an empty one is not
   assert.deepEqual(normalizeSaRoadEventPoints(collection([])), {
     records: [],
     skipped: 0,
+    ignored: 0,
   });
   assert.deepEqual(
     normalizeSaRoadEventSnapshot({
@@ -353,6 +357,370 @@ test('lines with out-of-state, malformed or too-short geometry are skipped', () 
     ['1'],
   );
   assert.equal(skipped, 5);
+});
+
+// Thinning only decides which vertices are drawn; every source vertex is still
+// checked, so a bad point the stride skips cannot ride in with a good line.
+test('line admission checks every source vertex, not just the thinned ones', () => {
+  const longLine = (mutate) => {
+    const coordinates = Array.from({ length: 5000 }, (_, i) => [
+      138 + i / 100000,
+      -34.5,
+    ]);
+    mutate(coordinates);
+    return coordinates;
+  };
+  const only = (properties, geometry) =>
+    normalizeSaRoadEventLines(collection([line(properties, geometry)]));
+  const lineString = (coordinates) => ({ type: 'LineString', coordinates });
+
+  // 5,000 points thin with stride 6, so indexes 1-5 are never sampled.
+  assert.equal(
+    only(
+      { LOCATION_ID: 'thinning-repro', PLOT_TYPE: 'RD_CLOSURE' },
+      lineString(
+        longLine((points) => {
+          points[1] = [151, -34.5];
+        }),
+      ),
+    ),
+    null,
+    'an out-of-state vertex between sampled ones is not silently dropped',
+  );
+  for (const [name, bad] of [
+    ['NaN', [Number.NaN, -34.5]],
+    ['null', null],
+    ['a numeric-string longitude', ['138.5', -34.5]],
+    ['a missing latitude', [138.5]],
+  ])
+    assert.equal(
+      only(
+        {},
+        lineString(
+          longLine((points) => {
+            points[2] = bad;
+          }),
+        ),
+      ),
+      null,
+      `${name} at an unsampled index rejects the line`,
+    );
+
+  assert.equal(
+    only(
+      {},
+      {
+        type: 'MultiLineString',
+        coordinates: [
+          longLine(() => {}),
+          longLine((points) => {
+            points[3] = [151, -34.5];
+          }),
+        ],
+      },
+    ),
+    null,
+    'corruption in a later part of a MultiLineString is rejected',
+  );
+
+  // Controls: valid geometry still normalises, and the vertex cap is unchanged.
+  const single = only({}, lineString(longLine(() => {})));
+  assert.equal(single.records.length, 1);
+  assert.ok(
+    single.records[0].lines[0].length <=
+      SA_ROAD_EVENT_LIMITS.maxLineVertices + 1,
+  );
+  const multi = only(
+    {},
+    {
+      type: 'MultiLineString',
+      coordinates: [longLine(() => {}), longLine(() => {})],
+    },
+  );
+  assert.equal(multi.records[0].lines.length, 2);
+  // A bad vertex on a sampled index (0, 6, 12, ...) is still rejected.
+  assert.equal(
+    only(
+      {},
+      lineString(
+        longLine((points) => {
+          points[6] = [151, -34.5];
+        }),
+      ),
+    ),
+    null,
+  );
+});
+
+const incidentsFixture = fixture('trafficsa-geohub-incidents.json');
+const closuresFixture = fixture('trafficsa-geohub-closures.json');
+
+test('incident-class rec_types get their own kinds; anything else stays unknown', () => {
+  assert.equal(pointKind('COLLISION'), 'collision');
+  assert.equal(pointKind(' flooding '), 'flooding');
+  assert.equal(pointKind('EMERGENCY WATERWORKS'), 'waterworks');
+  assert.equal(pointKind('SOMETHING NEW'), 'unknown');
+  for (const kind of ['incident', 'collision', 'flooding', 'waterworks'])
+    assert.ok(SA_ROAD_POINT_KINDS.includes(kind));
+  assert.ok(SA_ROAD_WORKS_KINDS.every((k) => SA_ROAD_POINT_KINDS.includes(k)));
+  assert.ok(!SA_ROAD_WORKS_KINDS.includes('incident'));
+});
+
+test('geohub incident rows normalize: lower-case fields, object-id ids, local dates', () => {
+  const { records, skipped, ignored } = normalizeSaRoadEventPoints(
+    incidentsFixture,
+    { source: 'incidents' },
+  );
+  assert.equal(skipped, 0);
+  assert.equal(ignored, 0);
+  assert.equal(records.length, incidentsFixture.features.length);
+  assert.deepEqual([...new Set(records.map(({ kind }) => kind))].sort(), [
+    'collision',
+    'flooding',
+    'incident',
+    'waterworks',
+  ]);
+  // Ids come from the numeric object id: the long roadworks_and_incidents_id
+  // strings hold punctuation and exceed the id pattern.
+  assert.ok(records.every(({ id }) => /^inc-\d+$/.test(id)));
+  const ferry = records.find(({ id }) => id === 'inc-3');
+  assert.equal(ferry.description, 'Ferry Closed');
+  assert.equal(ferry.road, 'Cooper Creek Ferry Crossing');
+  assert.equal(ferry.sideStreet, 'Birdsville Trk');
+  assert.equal(ferry.suburb, 'ETADUNNA');
+  assert.equal(ferry.direction, null, '"[]" carries no direction');
+  assert.equal(ferry.lanesClosed, null);
+  assert.equal(ferry.endMs, null);
+  // start_date_string "Tue 04 Aug 2026 08:24 AM", ACST (+09:30)
+  assert.equal(ferry.startMs, Date.parse('2026-08-04T08:24:12.500+09:30'));
+  const breakdown = records.find(({ id }) => id === 'inc-5780');
+  assert.equal(breakdown.direction, 'NORTHBOUND');
+  assert.equal(breakdown.lanesClosed, '1');
+  assert.equal(breakdown.speedLimit, '40');
+  // start_date_string "Fri 16 Oct 2026 11:05 PM", ACDT (+10:30)
+  assert.equal(breakdown.startMs, Date.parse('2026-10-16T23:05:11.410+10:30'));
+  const collision = records.find(({ kind }) => kind === 'collision');
+  assert.equal(collision.direction, 'NORTHBOUND / EASTBOUND / SOUTHBOUND');
+  assert.equal(collision.lanesClosed, null, 'every lanes_closed is 0');
+  assert.equal(
+    validateSaRoadEventsPayload({
+      points: records,
+      lines: [],
+      fetchedAt: 1,
+    }).points.length,
+    records.length,
+  );
+});
+
+test('an incident id never collides with a roadworks id', () => {
+  const roadworks = normalizeSaRoadEventPoints(pointsFixture, {
+    source: 'roadworks',
+  }).records;
+  const incidents = normalizeSaRoadEventPoints(incidentsFixture, {
+    source: 'incidents',
+  }).records;
+  const ids = [...roadworks, ...incidents].map(({ id }) => id);
+  assert.equal(new Set(ids).size, ids.length);
+  assert.equal(
+    validateSaRoadEventsPayload({
+      points: [...roadworks, ...incidents],
+      lines: [],
+      fetchedAt: 1,
+    })?.points.length,
+    ids.length,
+  );
+});
+
+test('the roadworks group keeps roadworks only; legacy INCIDENT rows are ignored, not failures', () => {
+  const { records, skipped, ignored } = normalizeSaRoadEventPoints(
+    pointsFixture,
+    { source: 'roadworks' },
+  );
+  assert.deepEqual([...new Set(records.map(({ kind }) => kind))].sort(), [
+    'works',
+    'works24',
+  ]);
+  assert.equal(ignored, 1, 'the fixture carries one stale INCIDENT row');
+  assert.equal(skipped, 0);
+  assert.equal(records.length + ignored, pointsFixture.features.length);
+  // A roadworks payload that is only stale incidents is empty, not broken...
+  const onlyIncident = collection(
+    pointsFixture.features.filter((f) => f.properties.REC_TYPE === 'INCIDENT'),
+  );
+  assert.deepEqual(
+    normalizeSaRoadEventPoints(onlyIncident, { source: 'roadworks' }),
+    { records: [], skipped: 0, ignored: 1 },
+  );
+  // ...but unusable rows still reject the group.
+  assert.equal(
+    normalizeSaRoadEventPoints(
+      collection([{ type: 'Feature', properties: {}, geometry: null }]),
+      { source: 'roadworks' },
+    ),
+    null,
+  );
+});
+
+test('traffic_dir parses the JSON string defensively and never throws', () => {
+  const json = (value) => JSON.stringify(value);
+  assert.deepEqual(
+    parseTrafficDirection(
+      json([
+        { direction: 'NORTHBOUND', lanes_closed: 1 },
+        { direction: 'SOUTHBOUND', lanes_closed: 0 },
+      ]),
+    ),
+    { direction: 'NORTHBOUND / SOUTHBOUND', lanesClosed: '1 NORTHBOUND' },
+  );
+  assert.deepEqual(
+    parseTrafficDirection(
+      json([
+        { direction: 'EASTBOUND', lanes_closed: 2 },
+        { direction: 'WESTBOUND', lanes_closed: 1 },
+      ]),
+    ),
+    {
+      direction: 'EASTBOUND / WESTBOUND',
+      lanesClosed: '2 EASTBOUND, 1 WESTBOUND',
+    },
+  );
+  assert.deepEqual(
+    parseTrafficDirection(json([{ direction: 'NORTHBOUND', lanes_closed: 3 }])),
+    { direction: 'NORTHBOUND', lanesClosed: '3' },
+  );
+  assert.deepEqual(
+    parseTrafficDirection(
+      json([{ direction: 'NORTHBOUND', lanes_closed: '2' }]),
+    ),
+    { direction: 'NORTHBOUND', lanesClosed: '2' },
+    'a numeric string is a lane count',
+  );
+  const none = { direction: null, lanesClosed: null };
+  for (const empty of ['[]', '', '   ', null, undefined, 5, {}, [], '{}'])
+    assert.deepEqual(parseTrafficDirection(empty), none, String(empty));
+  for (const malformed of [
+    '[{"direction": "NORTHBOUND"',
+    '[not json]',
+    '[1, 2, null, "x"]',
+    '[{"lanes_closed": 1}]',
+    '[{"direction": 5, "lanes_closed": 1}]',
+    '{"direction":"NORTHBOUND"}',
+    '[' + 'x'.repeat(5000) + ']',
+  ])
+    assert.deepEqual(
+      parseTrafficDirection(malformed),
+      none,
+      malformed.slice(0, 30),
+    );
+  // Odd lane counts are dropped, the direction is kept.
+  for (const lanes of [-1, 1.5, 1000, 'many', null, NaN])
+    assert.deepEqual(
+      parseTrafficDirection(
+        json([{ direction: 'NORTHBOUND', lanes_closed: lanes }]),
+      ),
+      { direction: 'NORTHBOUND', lanesClosed: null },
+      String(lanes),
+    );
+  // The roadworks service still sends plain text.
+  assert.deepEqual(parseTrafficDirection('South Bound'), {
+    direction: 'South Bound',
+    lanesClosed: null,
+  });
+  assert.equal(
+    parseTrafficDirection(
+      json(
+        Array.from({ length: 20 }, (_, i) => ({
+          direction: 'D' + i,
+          lanes_closed: 1,
+        })),
+      ),
+    ).direction.length <= 80,
+    true,
+    'the shown text is bounded',
+  );
+  // A bad traffic_dir on a row costs that row nothing but its direction.
+  const row = point({ traffic_dir: '[{oops' }, [138.6, -34.9]);
+  const { records } = normalizeSaRoadEventPoints(collection([row]));
+  assert.equal(records[0].direction, null);
+});
+
+test('no_lanes_closed text is the lanes fallback when traffic_dir has none', () => {
+  const row = point({
+    NO_LANES_CLOSED: 'One Lane',
+    TRAFFIC_DIR: 'South Bound',
+  });
+  const [record] = normalizeSaRoadEventPoints(collection([row])).records;
+  assert.equal(record.lanesClosed, 'One Lane');
+  assert.equal(record.direction, 'South Bound');
+});
+
+test('geohub closure rows normalize: GUID ids, HTML stripped, wall-clock dates', () => {
+  const { records, skipped } = normalizeSaRoadEventLines(closuresFixture);
+  assert.equal(skipped, 0);
+  assert.equal(records.length, closuresFixture.features.length);
+  assert.deepEqual([...new Set(records.map(({ kind }) => kind))].sort(), [
+    'closure',
+    'detour',
+  ]);
+  assert.ok(
+    records.every(({ id }) =>
+      /^[0-9A-F]{8}(-[0-9A-F]{4}){3}-[0-9A-F]{12}$/.test(id),
+    ),
+    'location_id GUIDs lose their braces',
+  );
+  const belton = records.find(({ road }) => road === 'BELTON ROAD');
+  assert.match(belton.details, /^District Council of Orroroo Carrieton/);
+  assert.ok(!/[<>]/.test(belton.details), 'the <p> markup is stripped');
+  assert.deepEqual(belton.startStreets, ['WIERRA DOWNS RD']);
+  assert.deepEqual(belton.endStreets, [], 'a blank end street is dropped');
+  assert.equal(belton.endMs, null);
+  assert.equal(belton.startMs, Date.parse('2026-03-13T18:00:00+10:30'));
+  const detour = records.find(({ kind }) => kind === 'detour');
+  assert.equal(detour.road, 'TEMPLETON ROAD');
+  assert.ok(Number.isFinite(detour.endMs) && detour.endMs > detour.startMs);
+  assert.equal(
+    validateSaRoadEventsPayload({ points: [], lines: records, fetchedAt: 1 })
+      ?.lines.length,
+    records.length,
+  );
+});
+
+test('the payload carries per-group source status, defaulting to all live', () => {
+  const body = { points: [], lines: [], fetchedAt: 1_700_000_000_000 };
+  assert.deepEqual(validateSaRoadEventsPayload(body).sources, {
+    roadworks: { status: 'live', fetchedAt: body.fetchedAt, mirror: false },
+    incidents: { status: 'live', fetchedAt: body.fetchedAt, mirror: false },
+    closures: { status: 'live', fetchedAt: body.fetchedAt, mirror: false },
+  });
+  assert.equal(
+    validateSaRoadEventsPayload({ ...body, stale: true }).sources.closures
+      .status,
+    'stale',
+  );
+  const sources = {
+    roadworks: { status: 'live', fetchedAt: 5, mirror: true },
+    incidents: { status: 'stale', fetchedAt: 3 },
+    closures: { status: 'unavailable', fetchedAt: null },
+  };
+  const ok = validateSaRoadEventsPayload({ ...body, sources });
+  assert.equal(ok.sources.roadworks.mirror, true);
+  assert.equal(ok.sources.incidents.mirror, false);
+  assert.equal(ok.sources.closures.status, 'unavailable');
+  for (const bad of [
+    null,
+    [],
+    'live',
+    { ...sources, closures: undefined },
+    { ...sources, closures: { status: 'down', fetchedAt: null } },
+    { ...sources, closures: { status: 'live', fetchedAt: 'now' } },
+    { ...sources, closures: { status: 'unavailable', fetchedAt: 4 } },
+    { roadworks: sources.roadworks, incidents: sources.incidents },
+  ])
+    assert.equal(
+      validateSaRoadEventsPayload({ ...body, sources: bad }),
+      null,
+      JSON.stringify(bad),
+    );
 });
 
 // Thinning only decides which vertices are drawn; every source vertex is still

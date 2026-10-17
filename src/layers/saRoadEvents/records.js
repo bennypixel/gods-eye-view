@@ -8,16 +8,43 @@
  * schema change fails loudly into the proxy's last-good path instead of
  * blanking the layer.
  *
+ * Two upstream services feed this module. The roadworks service
+ * (maps.sa.gov.au, upper-case field names) carries the roadworks points; the
+ * Traffic SA "TrafficSATime" service (geohub.sa.gov.au, lower-case field
+ * names) carries incidents and closures/detours. Property names are matched
+ * case-insensitively so one code path reads both.
+ *
  * Every text field is plain text. HTML-looking markup in upstream descriptions
  * is stripped here and the overlay card draws text only.
  */
 
-/** Point kinds, from the upstream REC_TYPE. */
+/**
+ * Point kinds, from the upstream rec_type. `incident`, `collision`,
+ * `flooding` and `waterworks` are incident-class (live events, shown by
+ * default); `works24` and `works` are the two roadworks kinds.
+ */
 export const SA_ROAD_POINT_KINDS = Object.freeze([
   'incident',
+  'collision',
+  'flooding',
+  'waterworks',
   'works24',
   'works',
   'unknown',
+]);
+/** Point kinds that are roadworks (the roadworks group carries only these). */
+export const SA_ROAD_WORKS_KINDS = Object.freeze(['works24', 'works']);
+/** The three independently fetched upstream groups. */
+export const SA_ROAD_SOURCE_GROUPS = Object.freeze([
+  'roadworks',
+  'incidents',
+  'closures',
+]);
+/** How the proxy is serving one group. */
+export const SA_ROAD_SOURCE_STATUSES = Object.freeze([
+  'live',
+  'stale',
+  'unavailable',
 ]);
 /** Line kinds, from the upstream PLOT_TYPE. */
 export const SA_ROAD_LINE_KINDS = Object.freeze([
@@ -46,6 +73,10 @@ export const SA_ROAD_EVENT_LIMITS = Object.freeze({
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,40}$/;
 const SHORT_TEXT = 160;
 const LONG_TEXT = 1_500;
+/** Direction and lanes-closed text can name several carriageways. */
+const TRAFFIC_TEXT = 80;
+const MAX_TRAFFIC_ENTRIES = 8;
+const MAX_TRAFFIC_JSON = 2_000;
 
 /**
  * Reduce an untrusted upstream string to bounded plain text.
@@ -122,7 +153,7 @@ function recordId(feature, ...candidates) {
       typeof value === 'number' && Number.isFinite(value)
         ? String(value)
         : typeof value === 'string'
-          ? value.trim()
+          ? value.trim().replace(/^\{(.*)\}$/, '$1')
           : '';
     if (ID_PATTERN.test(text)) return text;
   }
@@ -145,13 +176,16 @@ export function inSaBounds(lon, lat) {
 const round = (value) => Math.round(value * 1e7) / 1e7;
 
 /**
- * Map the upstream REC_TYPE to a point kind.
- * @param {*} recType - Upstream REC_TYPE.
- * @returns {'incident'|'works24'|'works'|'unknown'}
+ * Map the upstream rec_type to a point kind.
+ * @param {*} recType - Upstream rec_type (e.g. "COLLISION").
+ * @returns {'incident'|'collision'|'flooding'|'waterworks'|'works24'|'works'|'unknown'}
  */
 export function pointKind(recType) {
   const text = typeof recType === 'string' ? recType.trim().toUpperCase() : '';
   if (text === 'INCIDENT') return 'incident';
+  if (text === 'COLLISION') return 'collision';
+  if (text === 'FLOODING') return 'flooding';
+  if (text === 'EMERGENCY WATERWORKS') return 'waterworks';
   if (text === '24HR ROADWORKS') return 'works24';
   if (text === 'ROADWORKS') return 'works';
   return 'unknown';
@@ -169,38 +203,113 @@ export function lineKind(plotType) {
   return 'unknown';
 }
 
-function normalizePoint(feature) {
-  const properties = feature?.properties;
+/** Property bag with lower-cased names, so both services read the same way. */
+function lowerKeys(properties) {
   if (
     !properties ||
     typeof properties !== 'object' ||
     Array.isArray(properties)
   )
     return null;
+  const lower = Object.create(null);
+  for (const [name, value] of Object.entries(properties))
+    lower[name.toLowerCase()] = value;
+  return lower;
+}
+
+/**
+ * Direction and lanes closed from a point's `traffic_dir`. The incidents
+ * service sends a JSON-encoded string such as
+ * `[{"direction":"NORTHBOUND","lanes_closed":1}]` (or `"[]"`); the
+ * roadworks service sends plain text such as "South Bound". Anything that is
+ * not one of those, including malformed JSON, yields nulls and never throws.
+ * @param {*} value - Upstream traffic_dir.
+ * @returns {{direction: string|null, lanesClosed: string|null}}
+ */
+export function parseTrafficDirection(value) {
+  const none = { direction: null, lanesClosed: null };
+  if (typeof value !== 'string') return none;
+  const text = value.trim();
+  if (!text) return none;
+  if (text[0] !== '[' && text[0] !== '{')
+    return { direction: cleanText(text, TRAFFIC_TEXT), lanesClosed: null };
+  if (text.length > MAX_TRAFFIC_JSON) return none;
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return none;
+  }
+  if (!Array.isArray(parsed)) return none;
+  const entries = [];
+  for (const item of parsed.slice(0, MAX_TRAFFIC_ENTRIES)) {
+    if (!item || typeof item !== 'object') continue;
+    const direction = cleanText(item.direction, 40);
+    if (!direction) continue;
+    const closed = Number(item.lanes_closed);
+    entries.push({
+      direction,
+      lanes:
+        Number.isInteger(closed) && closed > 0 && closed < 100 ? closed : 0,
+    });
+  }
+  if (!entries.length) return none;
+  const directions = [...new Set(entries.map((entry) => entry.direction))];
+  const closedLanes = entries.filter((entry) => entry.lanes > 0);
+  let lanesClosed = null;
+  if (closedLanes.length)
+    lanesClosed =
+      entries.length === 1
+        ? String(closedLanes[0].lanes)
+        : closedLanes
+            .map((entry) => entry.lanes + ' ' + entry.direction)
+            .join(', ');
+  return {
+    direction: cleanText(directions.join(' / '), TRAFFIC_TEXT),
+    lanesClosed: cleanText(lanesClosed, TRAFFIC_TEXT),
+  };
+}
+
+/** Incident ids are the numeric object id, prefixed so they never meet a roadworks id. */
+function incidentId(feature, properties) {
+  for (const value of [properties.incident_id, feature?.id])
+    if (Number.isInteger(value) && value >= 0) return 'inc-' + value;
+  return null;
+}
+
+function normalizePoint(feature, source) {
+  const properties = lowerKeys(feature?.properties);
+  if (!properties) return null;
   const geometry = feature.geometry;
   if (geometry?.type !== 'Point' || !Array.isArray(geometry.coordinates))
     return null;
   const [lon, lat] = geometry.coordinates;
   if (!inSaBounds(lon, lat)) return null;
-  const id = recordId(feature, properties.ROADWORKS_AND_INCIDENTS_ID);
+  const id =
+    source === 'incidents'
+      ? incidentId(feature, properties)
+      : recordId(feature, properties.roadworks_and_incidents_id);
   if (!id) return null;
+  const traffic = parseTrafficDirection(properties.traffic_dir);
   return {
     id,
-    kind: pointKind(properties.REC_TYPE),
-    description: cleanText(properties.DESCRIPTION, LONG_TEXT),
-    road: cleanText(properties.LOCAL_ROAD),
-    sideStreet: cleanText(properties.SIDE_STREET),
-    suburb: cleanText(properties.SUBURB),
-    direction: cleanText(properties.TRAFFIC_DIR, 40),
-    lanesClosed: cleanText(properties.NO_LANES_CLOSED, 40),
+    kind: pointKind(properties.rec_type),
+    description: cleanText(properties.description, LONG_TEXT),
+    road: cleanText(properties.local_road),
+    sideStreet: cleanText(properties.side_street),
+    suburb: cleanText(properties.suburb),
+    direction: traffic.direction,
+    lanesClosed:
+      traffic.lanesClosed ||
+      cleanText(properties.no_lanes_closed, TRAFFIC_TEXT),
     speedLimit: cleanText(
-      typeof properties.SPEED_LIMIT === 'number'
-        ? String(properties.SPEED_LIMIT)
-        : properties.SPEED_LIMIT,
+      typeof properties.speed_limit === 'number'
+        ? String(properties.speed_limit)
+        : properties.speed_limit,
       40,
     ),
-    startMs: adelaideWallClockToInstant(properties.START_DATE),
-    endMs: adelaideWallClockToInstant(properties.END_DATE),
+    startMs: adelaideWallClockToInstant(properties.start_date),
+    endMs: adelaideWallClockToInstant(properties.end_date),
     lon: round(lon),
     lat: round(lat),
   };
@@ -246,18 +355,13 @@ function normalizeLineGeometry(geometry, budget) {
 
 const streets = (properties, prefix) =>
   [1, 2, 3]
-    .map((n) => cleanText(properties[`${prefix}_SIDE_STREET_NAME${n}`]))
+    .map((n) => cleanText(properties[prefix + '_side_street_name' + n]))
     .filter(Boolean);
 
 function normalizeLine(feature, budget) {
-  const properties = feature?.properties;
-  if (
-    !properties ||
-    typeof properties !== 'object' ||
-    Array.isArray(properties)
-  )
-    return null;
-  const id = recordId(feature, properties.LOCATION_ID);
+  const properties = lowerKeys(feature?.properties);
+  if (!properties) return null;
+  const id = recordId(feature, properties.location_id);
   if (!id) return null;
   const geometry = normalizeLineGeometry(feature.geometry, budget);
   if (!geometry) return null;
@@ -265,18 +369,18 @@ function normalizeLine(feature, budget) {
   return {
     record: {
       id,
-      kind: lineKind(properties.PLOT_TYPE),
+      kind: lineKind(properties.plot_type),
       details: cleanText(
-        properties.PLOT_DETAILS || properties.PLOT_ALT_TEXT,
+        properties.plot_details || properties.plot_alt_text,
         LONG_TEXT,
       ),
-      road: cleanText(properties.LOCAL_ROAD_NAME),
-      startStreets: streets(properties, 'START'),
-      startSuburb: cleanText(properties.START_SUBURB),
-      endStreets: streets(properties, 'END'),
-      endSuburb: cleanText(properties.END_SUBURB),
-      startMs: adelaideWallClockToInstant(properties.START_DATE),
-      endMs: adelaideWallClockToInstant(properties.END_DATE),
+      road: cleanText(properties.local_road_name),
+      startStreets: streets(properties, 'start'),
+      startSuburb: cleanText(properties.start_suburb),
+      endStreets: streets(properties, 'end'),
+      endSuburb: cleanText(properties.end_suburb),
+      startMs: adelaideWallClockToInstant(properties.start_date),
+      endMs: adelaideWallClockToInstant(properties.end_date),
       anchor: middle,
       lines: geometry.lines,
     },
@@ -288,21 +392,36 @@ const isFeatureCollection = (value) =>
   value?.type === 'FeatureCollection' && Array.isArray(value.features);
 
 /**
- * Normalize the roadworks/incidents point collection.
+ * Normalize a point collection.
  * @param {object} collection - GeoJSON FeatureCollection (pages already joined).
- * @returns {{records: object[], skipped: number}|null} null when the payload
- *   is not a feature collection or none of its rows is usable.
+ * @param {{source?: 'roadworks'|'incidents'}} [options] - Which upstream group
+ *   this is. `roadworks` keeps only the two roadworks kinds: the roadworks
+ *   service still carries a few stale INCIDENT rows, which the incidents
+ *   service supersedes, so they are counted in `ignored`, not `skipped`.
+ *   `incidents` takes ids from the object id. Omitted, every kind is kept.
+ * @returns {{records: object[], skipped: number, ignored: number}|null} null
+ *   when the payload is not a feature collection or none of its rows is
+ *   usable.
  */
-export function normalizeSaRoadEventPoints(collection) {
+export function normalizeSaRoadEventPoints(collection, { source } = {}) {
   if (!isFeatureCollection(collection)) return null;
   const records = [];
   const ids = new Set();
   let skipped = 0;
+  let ignored = 0;
   for (const feature of collection.features) {
     const record =
       records.length < SA_ROAD_EVENT_LIMITS.maxPoints
-        ? normalizePoint(feature)
+        ? normalizePoint(feature, source)
         : null;
+    if (
+      record &&
+      source === 'roadworks' &&
+      !SA_ROAD_WORKS_KINDS.includes(record.kind)
+    ) {
+      ignored++;
+      continue;
+    }
     if (!record || ids.has(record.id)) {
       skipped++;
       continue;
@@ -310,8 +429,8 @@ export function normalizeSaRoadEventPoints(collection) {
     ids.add(record.id);
     records.push(record);
   }
-  if (collection.features.length && !records.length) return null;
-  return { records, skipped };
+  if (collection.features.length && !records.length && !ignored) return null;
+  return { records, skipped, ignored };
 }
 
 /**
@@ -374,8 +493,8 @@ function validPointRecord(record) {
     textOrNull(record.road, SHORT_TEXT) &&
     textOrNull(record.sideStreet, SHORT_TEXT) &&
     textOrNull(record.suburb, SHORT_TEXT) &&
-    textOrNull(record.direction, 40) &&
-    textOrNull(record.lanesClosed, 40) &&
+    textOrNull(record.direction, TRAFFIC_TEXT) &&
+    textOrNull(record.lanesClosed, TRAFFIC_TEXT) &&
     textOrNull(record.speedLimit, 40) &&
     (record.startMs === null || Number.isFinite(record.startMs)) &&
     (record.endMs === null || Number.isFinite(record.endMs))
@@ -428,13 +547,38 @@ function validLineRecord(record) {
   );
 }
 
+/** Strict check of the proxy's per-group status block. */
+function validSources(sources) {
+  if (!sources || typeof sources !== 'object' || Array.isArray(sources))
+    return null;
+  const checked = {};
+  for (const group of SA_ROAD_SOURCE_GROUPS) {
+    const entry = sources[group];
+    if (!entry || typeof entry !== 'object') return null;
+    if (!SA_ROAD_SOURCE_STATUSES.includes(entry.status)) return null;
+    if (entry.fetchedAt !== null && !Number.isFinite(entry.fetchedAt))
+      return null;
+    if (entry.status === 'unavailable' && entry.fetchedAt !== null) return null;
+    checked[group] = {
+      status: entry.status,
+      fetchedAt: entry.fetchedAt,
+      mirror: entry.mirror === true,
+    };
+  }
+  return checked;
+}
+
 /**
  * Validate a proxy response body as a whole before anything is rendered.
  * Unlike the upstream normalizer this never skips: a single malformed record
  * means the payload is not from our proxy, so the whole snapshot is refused.
  * @param {*} payload - Parsed `/api/sa-road-events` body.
  * @returns {{points: object[], lines: object[], fetchedAt: number,
- *   stale: boolean, mirror: boolean}|null} The snapshot, or null if malformed.
+ *   stale: boolean, mirror: boolean, sources: Record<string, {status:
+ *   string, fetchedAt: number|null, mirror: boolean}>}|null} The snapshot, or
+ *   null if malformed. `sources` says whether each upstream group is live,
+ *   served stale, or unavailable (its records are then absent, not empty); a
+ *   body without it is read as every group live (or stale, when `stale`).
  */
 export function validateSaRoadEventsPayload(payload) {
   if (!payload || typeof payload !== 'object') return null;
@@ -459,11 +603,20 @@ export function validateSaRoadEventsPayload(payload) {
     for (const line of record.lines) vertices += line.length;
   }
   if (vertices > SA_ROAD_EVENT_LIMITS.maxTotalVertices) return null;
-  return {
-    points,
-    lines,
-    fetchedAt,
-    stale: payload.stale === true,
-    mirror: payload.mirror === true,
-  };
+  const stale = payload.stale === true;
+  const mirror = payload.mirror === true;
+  let sources;
+  if (payload.sources === undefined) {
+    const status = stale ? 'stale' : 'live';
+    sources = Object.fromEntries(
+      SA_ROAD_SOURCE_GROUPS.map((group) => [
+        group,
+        { status, fetchedAt, mirror: group === 'roadworks' && mirror },
+      ]),
+    );
+  } else {
+    sources = validSources(payload.sources);
+    if (!sources) return null;
+  }
+  return { points, lines, fetchedAt, stale, mirror, sources };
 }
