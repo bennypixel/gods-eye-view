@@ -1,25 +1,80 @@
-import { normalizeSaRoadEventSnapshot } from '../../src/layers/saRoadEvents/records.js';
+import {
+  SA_ROAD_SOURCE_GROUPS,
+  normalizeSaRoadEventLines,
+  normalizeSaRoadEventPoints,
+} from '../../src/layers/saRoadEvents/records.js';
 import { readResponseJsonCapped, coalesceProxyRequest } from './common/http.js';
 import { makeRateLimiter, clientKey } from './common/rate-limit.js';
 
 // Traffic SA open data (Department for Infrastructure and Transport,
-// Government of South Australia): a keyless ArcGIS MapServer. The second
-// service is an identical mirror, used only when the primary fails.
-const SERVICE_ROOT =
+// Government of South Australia): keyless ArcGIS MapServers. The data is split
+// across two services, read as three independent groups:
+//
+//   roadworks  maps.sa.gov.au TrafficSAOpenData layer 0 (the identical
+//              TrafficSAOpenData2 mirror is used only if it fails). Only its
+//              ROADWORKS kinds are kept: its INCIDENT rows are stale.
+//   incidents  geohub TrafficSATime_OpenData layer 0.
+//   closures   geohub TrafficSATime_OpenData layer 2 (closures and detours).
+//
+// The old closures layer (TrafficSAOpenData layer 1, and its mirror) stopped
+// updating in May 2026 and is deliberately never read: stale closures would
+// look like live ones. If the geohub host is unreachable the incidents and
+// closures groups report `unavailable`; nothing falls back to the old layers.
+const MAPS_ROOT =
   'https://maps.sa.gov.au/arcgis/rest/services/DPTIExtTransport';
-const PRIMARY = `${SERVICE_ROOT}/TrafficSAOpenData/MapServer`;
-const MIRROR = `${SERVICE_ROOT}/TrafficSAOpenData2/MapServer`;
+const GEOHUB_SERVICE =
+  'https://dit-cms-prod.geohub.sa.gov.au/arcgis/rest/services/TrafficSATime_OpenData/TrafficSATime_OpenData/MapServer';
 const USER_AGENT =
   'gods-eye-view-sa-road-events-proxy/1.0 (+https://github.com/bilawalsidhu/gods-eye-view)';
 
-// Layer 0 holds roadworks and incidents (points, OID ESRI_OID); layer 1 holds
-// closures and detours (lines, OID LOCATION_ID). Paging needs a stable order.
-const LAYERS = Object.freeze({
-  points: Object.freeze({ index: 0, orderBy: 'ESRI_OID' }),
-  lines: Object.freeze({ index: 1, orderBy: 'LOCATION_ID' }),
+// Paging needs a stable order field, and each layer names its own: the
+// roadworks layer has ESRI_OID, the geohub incidents layer has no ESRI_OID
+// (its object id is incident_id), the geohub closures layer has ESRI_OID.
+// ArcGIS answers an unknown order field with HTTP 200 and an error object,
+// which the page check below treats as a failed group.
+const ROADWORKS_LAYER = Object.freeze({ index: 0, orderBy: 'ESRI_OID' });
+const INCIDENTS_LAYER = Object.freeze({ index: 0, orderBy: 'incident_id' });
+const CLOSURES_LAYER = Object.freeze({ index: 2, orderBy: 'ESRI_OID' });
+
+/** Fixed upstream services per group; exported for tests and docs. */
+export const SA_ROAD_EVENTS_UPSTREAMS = Object.freeze({
+  roadworks: Object.freeze({
+    layer: ROADWORKS_LAYER,
+    services: Object.freeze([
+      Object.freeze({
+        base: `${MAPS_ROOT}/TrafficSAOpenData/MapServer`,
+        mirror: false,
+      }),
+      Object.freeze({
+        base: `${MAPS_ROOT}/TrafficSAOpenData2/MapServer`,
+        mirror: true,
+      }),
+    ]),
+  }),
+  incidents: Object.freeze({
+    layer: INCIDENTS_LAYER,
+    services: Object.freeze([
+      Object.freeze({ base: GEOHUB_SERVICE, mirror: false }),
+    ]),
+  }),
+  closures: Object.freeze({
+    layer: CLOSURES_LAYER,
+    services: Object.freeze([
+      Object.freeze({ base: GEOHUB_SERVICE, mirror: false }),
+    ]),
+  }),
 });
+
+const NORMALIZERS = Object.freeze({
+  roadworks: (collection) =>
+    normalizeSaRoadEventPoints(collection, { source: 'roadworks' }),
+  incidents: (collection) =>
+    normalizeSaRoadEventPoints(collection, { source: 'incidents' }),
+  closures: normalizeSaRoadEventLines,
+});
+
 const PAGE_SIZE = 1000;
-// ~1,300 points today (two pages); ten pages is 7x headroom, and a feed that
+// ~1,400 roadworks today (two pages); ten pages is 7x headroom, and a feed that
 // still claims more is treated as broken rather than silently truncated.
 const MAX_PAGES = 10;
 const MIB = 1024 * 1024;
@@ -71,9 +126,14 @@ export function saRoadEventsProxy({
   now = () => Date.now(),
   policy = SA_ROAD_EVENTS_POLICY,
 } = {}) {
-  let cache = null;
-  let retryAt = -Infinity;
-  const inFlight = new Map();
+  // Each group has its own last-good cache, backoff and in-flight request, so
+  // one upstream failing never blanks or delays the others.
+  const groups = Object.fromEntries(
+    SA_ROAD_SOURCE_GROUPS.map((name) => [
+      name,
+      { name, cache: null, retryAt: -Infinity, inFlight: new Map() },
+    ]),
+  );
   const allow = makeRateLimiter({ windowMs: 60_000, max: 30, globalMax: 600 });
 
   /** Every page of one layer, or a throw: a partial layer is never returned. */
@@ -119,45 +179,54 @@ export function saRoadEventsProxy({
     throw new Error('sa_too_many_pages');
   }
 
-  async function fetchFrom(base, mirror) {
+  /** One group from one service: all its pages, normalized, or a throw. */
+  async function fetchFrom(name, { base, mirror }) {
     const signal = AbortSignal.timeout(policy.timeoutMs);
-    const points = await fetchLayer(base, LAYERS.points, signal);
-    const lines = await fetchLayer(base, LAYERS.lines, signal);
-    const snapshot = normalizeSaRoadEventSnapshot({ points, lines });
-    if (!snapshot) throw new Error('sa_invalid_snapshot');
-    return { fetchedAt: now(), ...snapshot, mirror };
+    const collection = await fetchLayer(
+      base,
+      SA_ROAD_EVENTS_UPSTREAMS[name].layer,
+      signal,
+    );
+    const normalized = NORMALIZERS[name](collection);
+    if (!normalized) throw new Error('sa_invalid_snapshot');
+    return { fetchedAt: now(), records: normalized.records, mirror };
   }
 
-  /** Primary first; the mirror only after a non-429 failure. */
-  async function fetchSnapshot() {
-    try {
-      return await fetchFrom(PRIMARY, false);
-    } catch (error) {
-      // A rate limit applies to this client, not the host: do not shop around.
-      if (error.status === 429) throw error;
-      return await fetchFrom(MIRROR, true);
+  /** The group's services in order; the next only after a non-429 failure. */
+  async function fetchGroup(name) {
+    const { services } = SA_ROAD_EVENTS_UPSTREAMS[name];
+    let failure;
+    for (const service of services) {
+      try {
+        return await fetchFrom(name, service);
+      } catch (error) {
+        // A rate limit applies to this client, not the host: do not shop around.
+        if (error.status === 429) throw error;
+        failure = error;
+      }
     }
+    throw failure;
   }
 
   /** Fresh cache, else one shared upstream read; failures back off. */
-  async function acquire() {
-    if (cache && now() - cache.fetchedAt < policy.freshMs)
-      return { value: cache, stale: false };
-    if (!inFlight.size && now() < retryAt) {
-      if (cache) return { value: cache, stale: true };
+  async function acquire(group) {
+    if (group.cache && now() - group.cache.fetchedAt < policy.freshMs)
+      return { value: group.cache, stale: false };
+    if (!group.inFlight.size && now() < group.retryAt) {
+      if (group.cache) return { value: group.cache, stale: true };
       throw new Error('sa_retry_later');
     }
     try {
       const { promise } = coalesceProxyRequest(
-        inFlight,
+        group.inFlight,
         'snapshot',
         async () => {
           try {
-            cache = await fetchSnapshot();
-            retryAt = -Infinity;
-            return cache;
+            group.cache = await fetchGroup(group.name);
+            group.retryAt = -Infinity;
+            return group.cache;
           } catch (error) {
-            retryAt =
+            group.retryAt =
               now() + (error.retryAfterMs ?? policy.retryAfterFailureMs);
             throw error;
           }
@@ -165,9 +234,60 @@ export function saRoadEventsProxy({
       );
       return { value: await promise, stale: false };
     } catch (error) {
-      if (cache) return { value: cache, stale: true };
+      if (group.cache) return { value: group.cache, stale: true };
       throw error;
     }
+  }
+
+  /**
+   * One group's contribution to the response: live, stale (last good, still
+   * inside the stale limit), or null when there is nothing trustworthy.
+   */
+  async function readGroup(group) {
+    try {
+      const { value, stale } = await acquire(group);
+      if (stale && now() - value.fetchedAt > policy.staleLimitMs) return null;
+      return { value, status: stale ? 'stale' : 'live' };
+    } catch {
+      return null;
+    }
+  }
+
+  async function snapshot() {
+    const read = await Promise.all(
+      SA_ROAD_SOURCE_GROUPS.map((name) => readGroup(groups[name])),
+    );
+    const results = Object.fromEntries(
+      SA_ROAD_SOURCE_GROUPS.map((name, i) => [name, read[i]]),
+    );
+    const available = read.filter(Boolean);
+    if (!available.length) return null;
+    const sources = Object.fromEntries(
+      SA_ROAD_SOURCE_GROUPS.map((name) => {
+        const result = results[name];
+        return [
+          name,
+          result
+            ? {
+                status: result.status,
+                fetchedAt: result.value.fetchedAt,
+                mirror: result.value.mirror,
+              }
+            : { status: 'unavailable', fetchedAt: null, mirror: false },
+        ];
+      }),
+    );
+    return {
+      points: [
+        ...(results.roadworks?.value.records ?? []),
+        ...(results.incidents?.value.records ?? []),
+      ],
+      lines: results.closures?.value.records ?? [],
+      fetchedAt: Math.max(...available.map(({ value }) => value.fetchedAt)),
+      stale: available.some(({ status }) => status === 'stale'),
+      mirror: sources.roadworks.mirror,
+      sources,
+    };
   }
 
   async function handler(req, res) {
@@ -188,20 +308,9 @@ export function saRoadEventsProxy({
       return json(404, { error: 'unknown_route' });
     if (!allow(clientKey(req))) return json(429, { error: 'rate_limited' });
     try {
-      const { value, stale } = await acquire();
-      if (stale && now() - value.fetchedAt > policy.staleLimitMs)
-        return json(502, { error: 'sa_road_events_unavailable' });
-      json(
-        200,
-        {
-          points: value.points,
-          lines: value.lines,
-          fetchedAt: value.fetchedAt,
-          stale,
-          mirror: value.mirror,
-        },
-        stale ? { 'X-Data-Stale': 'true' } : {},
-      );
+      const body = await snapshot();
+      if (!body) return json(502, { error: 'sa_road_events_unavailable' });
+      json(200, body, body.stale ? { 'X-Data-Stale': 'true' } : {});
     } catch {
       json(502, { error: 'sa_road_events_unavailable' });
     }
