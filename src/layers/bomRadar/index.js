@@ -5,6 +5,7 @@ import { pickBomProduct, bomRangeLabel } from './select.js';
 import { maskBomFurniture } from './records.js';
 import { imageryHostStatus } from '../weather/imageryHost.js';
 import { decodeInfraredImage } from '../weather/infraredImage.js';
+import { msg, t, translateKnown } from '../../i18n/index.js';
 
 /** Each frame shows this long; the newest one holds longer before the loop restarts. */
 export const BOM_FRAME_MS = 500;
@@ -19,12 +20,13 @@ const OPACITY = { light: 0.45, strong: 0.85 };
 
 // Approximate rain-rate colours, light to extreme; the images carry their own.
 const LEGEND = [
-  ['Light', '#7878ff', 'Light rain'],
-  ['Moderate', '#009690', 'Moderate rain'],
-  ['Heavy', '#ffc800', 'Heavy rain'],
-  ['Very heavy', '#ff6400', 'Very heavy rain'],
-  ['Extreme', '#c80000', 'Extreme rain rates'],
+  [msg('Light'), '#7878ff', msg('Light rain')],
+  [msg('Moderate'), '#009690', msg('Moderate rain')],
+  [msg('Heavy'), '#ffc800', msg('Heavy rain')],
+  [msg('Very heavy'), '#ff6400', msg('Very heavy rain')],
+  [msg('Extreme'), '#c80000', msg('Extreme rain rates')],
 ];
+const BOM_NAME = 'Bureau of Meteorology';
 
 /**
  * `02:39 ACDT`: a UTC epoch in the viewer's own time zone (the browser's
@@ -32,7 +34,7 @@ const LEGEND = [
  * covers all of Australia, so no single local zone would suit every radar.
  */
 export function formatLocalTime(timeMs, timeZone) {
-  if (!Number.isFinite(timeMs)) return 'Unavailable';
+  if (!Number.isFinite(timeMs)) return t('Unavailable');
   const parts = Object.fromEntries(
     new Intl.DateTimeFormat('en-AU', {
       ...(timeZone ? { timeZone } : {}),
@@ -50,8 +52,11 @@ export function formatLocalTime(timeMs, timeZone) {
 const ageText = (timeMs, nowMs) => {
   const minutes = Math.max(0, Math.floor((nowMs - timeMs) / 60_000));
   return minutes >= 60
-    ? `${Math.floor(minutes / 60)} h ${minutes % 60} min ago`
-    : `${minutes} min ago`;
+    ? t('{hours} h {minutes} min ago', {
+        hours: Math.floor(minutes / 60),
+        minutes: minutes % 60,
+      })
+    : t('{minutes} min ago', { minutes });
 };
 
 async function mapPool(items, limit, worker) {
@@ -321,7 +326,7 @@ export function createBomRadarLayer({
     const { usable, discard } = await loadFrames(payload, controller.signal);
     if (controller.signal.aborted) return false;
     if (!usable.length) {
-      error = 'BoM radar frames unavailable';
+      error = msg('BoM radar frames unavailable');
       return true;
     }
     const previousFile = shownFrame()?.file;
@@ -410,7 +415,7 @@ export function createBomRadarLayer({
         await select(run.controller);
       } catch (cause) {
         if (current(run.controller))
-          error = cause?.message || 'BoM radar unavailable';
+          error = cause?.message || msg('BoM radar unavailable');
       } finally {
         run.end();
       }
@@ -512,7 +517,7 @@ export function createBomRadarLayer({
           return true;
         }
         // Keep the last loop on screen when a refresh fails.
-        error = cause?.message || 'BoM radar unavailable';
+        error = cause?.message || msg('BoM radar unavailable');
         return true;
       } finally {
         run.end();
@@ -557,68 +562,82 @@ export function createBomRadarLayer({
       const count = frames().length;
       const place = manifest
         ? [
-            manifest.name ?? `Radar ${pick?.radarId ?? ''}`.trim(),
+            manifest.name ??
+              (pick?.radarId
+                ? t('Radar {id}', { id: pick.radarId })
+                : t('Radar')),
             bomRangeLabel(manifest.rangeKm),
           ]
             .filter(Boolean)
             .join(' ')
         : null;
       const lines = [];
-      if (off) lines.push('Off · personal use only');
+      if (off) lines.push(t('Off · personal use only'));
       else if (frame && place) {
         lines.push(
           `${place} · ${formatLocalTime(frame.timeMs, timeZone)} · ${ageText(frame.timeMs, now())}`,
-          `Frame ${shownIndex + 1}/${count}${loading ? ' · loading' : ''}`,
+          loading
+            ? t('Frame {index}/{count} · loading', {
+                index: shownIndex + 1,
+                count,
+              })
+            : t('Frame {index}/{count}', { index: shownIndex + 1, count }),
         );
       } else
         lines.push(
           loading
-            ? 'Loading radar…'
+            ? t('Loading radar…')
             : !productsComplete && !off
-              ? 'Locating radars…'
+              ? t('Locating radars…')
               : radars.length
-                ? 'No BoM radar reaches the view centre · move closer to an Australian radar'
-                : 'Waiting for radar locations',
+                ? t(
+                    'No BoM radar reaches the view centre · move closer to an Australian radar',
+                  )
+                : t('Waiting for radar locations'),
         );
-      if (!productsComplete && frame && !off) lines.push('Locating radars…');
+      if (!productsComplete && frame && !off) lines.push(t('Locating radars…'));
       if (manifest?.stale || productsStale)
-        lines.push('STALE · last known radar listing');
-      if (delayed()) lines.push('Radar frames delayed');
+        lines.push(t('STALE · last known radar listing'));
+      if (delayed()) lines.push(t('Radar frames delayed'));
       const note = status || error;
-      if (note) lines.push(note);
-      lines.push('Bureau of Meteorology · personal use only');
+      if (note) lines.push(translateKnown(note));
+      lines.push(t('{source} · personal use only', { source: BOM_NAME }));
       return {
         chips: [
           {
             id: 'play',
-            label: looping ? 'Pause' : 'Loop',
+            label: looping ? t('Pause') : t('Loop'),
             active: looping && !motion?.matches,
             disabled: count < 2 || Boolean(motion?.matches),
             params: { play: true },
-            title: 'Animate the last frames of the radar loop',
+            title: t('Animate the last frames of the radar loop'),
           },
           ...['light', 'strong'].map((value) => ({
             id: `opacity-${value}`,
-            label: value === 'light' ? 'Soft' : 'Vivid',
+            label: value === 'light' ? t('Soft') : t('Vivid'),
             active: opacity === value,
             params: { opacity: value },
-            title: 'Image opacity; does not alter the observed values',
+            title: t('Image opacity; does not alter the observed values'),
           })),
           {
             id: 'coverage',
-            label: 'View radar',
+            label: t('View radar'),
             disabled: !manifest || !runNavigation,
             params: { focus: true },
           },
         ],
         legend: LEGEND.map(([label, color, blurb]) => ({
-          label,
+          label: t(label),
           color,
-          blurb: `${blurb} (approximate colours; the radar image carries the exact scale)`,
+          blurb: t(
+            '{blurb} (approximate colours; the radar image carries the exact scale)',
+            { blurb: t(blurb) },
+          ),
         })),
         info: lines.join('\n'),
-        infoTitle:
+        infoTitle: t(
           'Bureau of Meteorology rain radar, fetched live by this server over anonymous FTP. BoM allows personal or in-organisation use only: no redistribution, no public deployment. Frame times are shown in your own time zone. Images are georeferenced by their corner coordinates; the longest-range products can misregister by a few kilometres. Radar echoes are observed rainfall, not a forecast or warning.',
+        ),
       };
     },
     setRowControlsListener(value) {
@@ -628,7 +647,9 @@ export function createBomRadarLayer({
       const newest = frames().at(-1);
       return {
         count: frames().length,
-        countLabel: manifest ? bomRangeLabel(manifest.rangeKm) || 'Radar' : '—',
+        countLabel: manifest
+          ? bomRangeLabel(manifest.rangeKm) || t('Radar')
+          : '—',
         lastUpdate: newest?.timeMs ?? null,
         loading,
         error: error || rendering?.getDiagnostics().error || null,
