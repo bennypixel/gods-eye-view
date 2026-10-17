@@ -88,7 +88,20 @@ export function bomRadarProxy({
   cache: cacheLimits,
 } = {}) {
   let ftp = injectedFtp ?? null;
-  const getFtp = () => (ftp ??= createBomFtp());
+  // Set when the dev or preview server closes: nothing may reach BoM after it.
+  let closed = false;
+  const closedError = () => new Error('bom_radar_closed');
+  const getFtp = () => {
+    if (closed) throw closedError();
+    return (ftp ??= createBomFtp());
+  };
+  /** Stop all background work and refuse further upstream requests. */
+  function dispose() {
+    if (closed) return;
+    closed = true;
+    if (typeof ftp?.shutdown === 'function') ftp.shutdown();
+    else ftp?.close?.();
+  }
   const frames = createFrameCache(cacheLimits);
   const inFlight = new Map();
   const maps = new Map();
@@ -106,6 +119,7 @@ export function bomRadarProxy({
 
   /** The national directory, shared by every product; last good on failure. */
   async function getListing() {
+    if (closed) throw closedError();
     if (listing && now() - listing.fetchedAt < LISTING_TTL_MS)
       return { listing, stale: false };
     const backingOff =
@@ -134,6 +148,7 @@ export function bomRadarProxy({
 
   /** Georeferencing for a listed product; cached a day, kept on failure. */
   async function getMap(product) {
+    if (closed) throw closedError();
     const previous = maps.get(product);
     if (previous?.value && now() - previous.savedAt < MAP_TTL_MS)
       return previous.value;
@@ -162,6 +177,7 @@ export function bomRadarProxy({
   }
 
   async function getFrame(file) {
+    if (closed) throw closedError();
     const cached = frames.get(file);
     if (cached) return cached;
     return coalesced(`frame:${file}`, async () => {
@@ -197,6 +213,7 @@ export function bomRadarProxy({
     return coalesced('warm', async () => {
       let failures = 0;
       for (const radar of radars.slice(0, MAX_WARM_RADARS)) {
+        if (closed) break;
         if (settled(radar)) continue;
         // The 128 km product when present; every range of a radar shares its centre.
         const product =
@@ -205,7 +222,7 @@ export function bomRadarProxy({
           await getMap(product);
           failures = 0;
         } catch {
-          if (++failures >= WARM_ABORT_AFTER_FAILURES) break;
+          if (closed || ++failures >= WARM_ABORT_AFTER_FAILURES) break;
         }
       }
     });
@@ -286,6 +303,7 @@ export function bomRadarProxy({
       return send(200, { enabled: bomRadarEnabled(env()) });
     if (!bomRadarEnabled(env()))
       return send(503, { error: 'bom_radar_disabled' });
+    if (closed) return send(502, { error: 'bom_radar_unavailable' });
 
     let route;
     if (path === '/products') route = 'products';
@@ -343,11 +361,13 @@ export function bomRadarProxy({
     name: 'bom-radar',
     configureServer({ middlewares, httpServer }) {
       middlewares.use('/api/bom-radar', handler);
-      httpServer?.once?.('close', () => ftp?.close());
+      httpServer?.once?.('close', dispose);
     },
     configurePreviewServer({ middlewares, httpServer }) {
       middlewares.use('/api/bom-radar', handler);
-      httpServer?.once?.('close', () => ftp?.close());
+      httpServer?.once?.('close', dispose);
     },
+    // Backstop for middleware mode, where there is no httpServer to hang 'close' on.
+    closeBundle: dispose,
   };
 }

@@ -6,6 +6,7 @@ import {
   isPng,
 } from '../../server/providers/bomRadar.js';
 import { createFrameCache } from '../../server/providers/bomRadar/frameCache.js';
+import { createBomFtp } from '../../server/providers/bomRadar/ftp.js';
 
 // Tiny synthetic PNG bytes: the signature plus filler. No BoM imagery is bundled.
 const PNG = Buffer.concat([
@@ -99,6 +100,7 @@ function install(options = {}, hook = 'configureServer') {
     return res;
   };
   request.shutdown = () => closers.forEach((callback) => callback());
+  request.plugin = plugin;
   return request;
 }
 
@@ -544,4 +546,96 @@ test('the FTP session closes when the HTTP server does', async () => {
   const request = install({ ftp }, 'configurePreviewServer');
   request.shutdown();
   assert.equal(ftp.calls.close, 1);
+});
+
+/** A real FTP session over a fake client, counting every connect and map fetch. */
+function countingSession(listing, gate) {
+  const seen = { clients: 0, access: 0, maps: [], closed: 0 };
+  const ftp = createBomFtp({
+    clientFactory: async () => {
+      seen.clients++;
+      return {
+        async access() {
+          seen.access++;
+        },
+        async list() {
+          return listing.map((name) => ({ name, isFile: true }));
+        },
+        async downloadTo(sink, remotePath) {
+          seen.maps.push(remotePath);
+          if (seen.maps.length === 1 && gate) await gate;
+          const product = /(IDR\d+)\.map$/.exec(remotePath)[1];
+          await new Promise((resolve, reject) =>
+            sink.write(Buffer.from(MAP(product, -30, 130)), (error) =>
+              error ? reject(error) : resolve(),
+            ),
+          );
+        },
+        close() {
+          seen.closed++;
+        },
+      };
+    },
+  });
+  return { ftp, seen };
+}
+
+test('after the server closes, the warm-up stops: no more maps and no reconnect', async () => {
+  const radarListing = ['IDR413', 'IDR423', 'IDR433', 'IDR443', 'IDR453'].map(
+    (product) => `${product}.T.202610121609.png`,
+  );
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const { ftp, seen } = countingSession(radarListing, gate);
+  const request = install({ ftp, warmWaitMs: 5 });
+  const first = await request('/products');
+  assert.equal(first.status, 200);
+  assert.equal(first.body.complete, false);
+  assert.equal(seen.maps.length, 1, 'the warm-up is blocked on its first map');
+
+  request.shutdown();
+  assert.equal(seen.closed, 1, 'the open connection is closed at once');
+  release();
+  await new Promise((resolve) => setTimeout(resolve, 30));
+
+  assert.equal(seen.maps.length, 1, 'no further .map download starts');
+  assert.equal(seen.clients, 1, 'the warm-up did not reconnect');
+  assert.equal(ftp.stats().connected, false);
+  assert.equal(ftp.stats().closed, true);
+  assert.equal(ftp.stats().queued, 0);
+});
+
+test('requests after the server closed fail fast without calling the FTP client', async () => {
+  for (const hook of ['http-close', 'closeBundle']) {
+    const ftp = fakeFtp();
+    const request = install({ ftp }, 'configureServer');
+    await request('/products');
+    const before = {
+      list: ftp.calls.list.length,
+      download: ftp.calls.download.length,
+    };
+    if (hook === 'closeBundle') request.plugin.closeBundle();
+    else request.shutdown();
+    for (const url of [
+      '/products',
+      '/frames?product=IDR643',
+      `/frame/${frameName('IDR643', 3)}`,
+    ]) {
+      const res = await request(url);
+      assert.equal(res.status, 502, `${hook} ${url}`);
+      assert.deepEqual(res.body, { error: 'bom_radar_unavailable' });
+    }
+    assert.equal(ftp.calls.list.length, before.list, hook);
+    assert.equal(ftp.calls.download.length, before.download, hook);
+    assert.deepEqual((await request('/status')).body, { enabled: true });
+  }
+});
+
+test('a proxy that closed before it ever used FTP never builds a session', async () => {
+  const request = install({ env: () => ({ BOM_RADAR_ENABLED: '1' }) });
+  request.shutdown();
+  const res = await request('/products');
+  assert.equal(res.status, 502);
 });

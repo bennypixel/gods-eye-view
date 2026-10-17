@@ -205,3 +205,135 @@ test('the queue is bounded', async () => {
   assert.deepEqual(await ftp.list('/d'), []);
   ftp.close();
 });
+
+/** Replace the global timers with a registry so a test can see what is still pending. */
+function trackTimers() {
+  const realSet = globalThis.setTimeout;
+  const realClear = globalThis.clearTimeout;
+  const timers = new Set();
+  globalThis.setTimeout = (callback, ms, ...args) => {
+    const timer = {
+      ms,
+      unref() {
+        return timer;
+      },
+    };
+    timer.handle = realSet(() => {
+      timers.delete(timer);
+      callback(...args);
+    }, ms);
+    timers.add(timer);
+    return timer;
+  };
+  globalThis.clearTimeout = (timer) => {
+    if (timer && typeof timer === 'object' && timers.delete(timer))
+      realClear(timer.handle);
+    else realClear(timer);
+  };
+  return {
+    pending: () => [...timers],
+    restore() {
+      for (const timer of timers) realClear(timer.handle);
+      globalThis.setTimeout = realSet;
+      globalThis.clearTimeout = realClear;
+    },
+  };
+}
+
+test('shutdown closes the connection, clears the idle timer and refuses later operations', async () => {
+  const timers = trackTimers();
+  try {
+    const log = newLog();
+    const ftp = createBomFtp({
+      idleMs: 60_000,
+      clientFactory: async () => fakeClient(log),
+    });
+    await ftp.list('/a');
+    assert.equal(ftp.stats().connected, true);
+    assert.ok(
+      timers.pending().some(({ ms }) => ms === 60_000),
+      'the idle countdown is armed after the work',
+    );
+    ftp.shutdown();
+    assert.deepEqual(log.closed, [1]);
+    assert.equal(ftp.stats().connected, false);
+    assert.equal(ftp.stats().closed, true);
+    assert.deepEqual(timers.pending(), [], 'no timer outlives the session');
+    await assert.rejects(ftp.list('/a'), /ftp_closed/);
+    await assert.rejects(ftp.download('/a', 10), /ftp_closed/);
+    assert.equal(
+      log.clients.length,
+      1,
+      'no new client is built after shutdown',
+    );
+    assert.deepEqual(timers.pending(), []);
+  } finally {
+    timers.restore();
+  }
+});
+
+test('shutdown abandons a login in progress and closes its client', async () => {
+  const log = newLog();
+  const ftp = createBomFtp({
+    clientFactory: async () =>
+      fakeClient(log, { access: () => new Promise(() => {}) }),
+  });
+  const pending = ftp.list('/a');
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.equal(log.access.length, 1);
+  ftp.shutdown();
+  await assert.rejects(pending, /ftp_closed/);
+  assert.deepEqual(log.closed, [1]);
+});
+
+test('shutdown while a client is still being built discards it', async () => {
+  const log = newLog();
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const ftp = createBomFtp({
+    clientFactory: async () => {
+      await gate;
+      return fakeClient(log);
+    },
+  });
+  const pending = ftp.list('/a');
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  ftp.shutdown();
+  release();
+  await assert.rejects(pending, /ftp_closed/);
+  assert.deepEqual(log.access, [], 'the late client never logs in');
+  assert.deepEqual(log.closed, [1]);
+});
+
+test('operations queued behind a running one fail at shutdown instead of reconnecting', async () => {
+  const log = newLog();
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const ftp = createBomFtp({
+    clientFactory: async () =>
+      fakeClient(log, { list: async () => (await gate, []) }),
+  });
+  const first = ftp.list('/a');
+  const second = ftp.list('/b');
+  const third = ftp.download('/c', 10);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  ftp.shutdown();
+  release();
+  await assert.rejects(first, /ftp_closed/);
+  await assert.rejects(second, /ftp_closed/);
+  await assert.rejects(third, /ftp_closed/);
+  assert.equal(log.clients.length, 1);
+  assert.equal(
+    log.events.filter((event) => event.startsWith('list')).length,
+    1,
+    'the queued list never ran',
+  );
+  assert.deepEqual(
+    log.events.filter((event) => event.startsWith('download')),
+    [],
+  );
+});
