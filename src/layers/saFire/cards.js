@@ -1,4 +1,5 @@
 /** Card models and colour rules for the South Australian fire layer. Pure — no Cesium types. */
+import { msg, t, tn } from '../../i18n/index.js';
 import { zoneOffsetMs } from './records.js';
 
 export const SA_FIRE_OVERLAY_SOURCE_ID = 'sa-fire-incidents';
@@ -46,21 +47,21 @@ export function incidentStatusColor(status) {
 
 /** Legend bands, in severity order; the last band collects every other status. */
 export const INCIDENT_STATUS_BANDS = Object.freeze([
-  { status: 'Going', label: 'Going' },
-  { status: 'Contained', label: 'Contained' },
-  { status: 'Controlled', label: 'Controlled' },
-  { status: 'Safe', label: 'Safe' },
-  { status: null, label: 'Other / unknown' },
+  { status: 'Going', label: msg('Going') }, // i18n-ignore: feed value; `label` is shown
+  { status: 'Contained', label: msg('Contained') }, // i18n-ignore: feed value; `label` is shown
+  { status: 'Controlled', label: msg('Controlled') }, // i18n-ignore: feed value; `label` is shown
+  { status: 'Safe', label: msg('Safe') }, // i18n-ignore: feed value; `label` is shown
+  { status: null, label: msg('Other / unknown') },
 ]);
 
-/** Band label for a status (case-insensitive), matching INCIDENT_STATUS_BANDS. */
+/** Band label (English; show it through t()) for a status, case-insensitive, matching INCIDENT_STATUS_BANDS. */
 export function incidentStatusBand(status) {
   const key = String(status ?? '')
     .trim()
     .toLowerCase();
   return (
     INCIDENT_STATUS_BANDS.find((band) => band.status?.toLowerCase() === key)
-      ?.label ?? 'Other / unknown'
+      ?.label ?? msg('Other / unknown')
   );
 }
 
@@ -147,8 +148,6 @@ export function wrapCardText(text, width = 48, maxLines = 4) {
   return lines;
 }
 
-const plural = (n, noun) => `${n} ${noun}${n === 1 ? '' : 's'}`;
-
 /**
  * Overlay entry for one selected incident. The caller supplies `position`
  * (Cartesian); the model stays JSON-safe for tests.
@@ -163,26 +162,36 @@ export function buildIncidentCard(
   const facts = [row.status, row.level, row.agency].filter(Boolean);
   const place = [
     row.fireBanDistrict ? titleCase(row.fireBanDistrict) : null,
-    row.region ? `Region ${row.region}` : null,
+    row.region ? t('Region {region}', { region: row.region }) : null,
   ].filter(Boolean);
   const resources = [];
-  if (row.ground != null) resources.push(`${row.ground} ground`);
-  if (row.aircraft != null) resources.push(`${row.aircraft} aircraft`);
+  if (row.ground != null)
+    resources.push(tn(row.ground, '{count} ground', '{count} ground'));
+  if (row.aircraft != null)
+    resources.push(tn(row.aircraft, '{count} aircraft', '{count} aircraft'));
   if (row.messageCount != null)
-    resources.push(plural(row.messageCount, 'message'));
+    resources.push(tn(row.messageCount, '{count} message', '{count} messages'));
 
   const details = [];
   if (facts.length) details.push(facts.join(' · '));
   if (place.length) details.push(place.join(' · '));
   const reported = formatAdelaideDateTime(row.reportedTime);
-  details.push(reported ? `Reported ${reported}` : 'Reported time unknown');
+  details.push(
+    reported
+      ? t('Reported {time}', { time: reported })
+      : t('Reported time unknown'),
+  );
   if (resources.length) details.push(resources.join(' · '));
   if (warning)
-    details.push(`Warning: ${truncate(warning.category || 'Active', 40)}`);
+    details.push(
+      t('Warning: {category}', {
+        category: truncate(warning.category || t('Active'), 40),
+      }),
+    );
   const feed = formatAdelaideTime(feedTime);
-  if (feed) details.push(`Feed updated ${feed}`);
+  if (feed) details.push(t('Feed updated {time}', { time: feed }));
 
-  const title = `${row.type ? titleCase(row.type) : 'Incident'} · ${
+  const title = `${row.type ? titleCase(row.type) : t('Incident')} · ${
     row.name ? titleCase(row.name) : row.id
   }`;
   return {
@@ -210,30 +219,41 @@ export function buildWarningCard(
   row,
   { feedTime = null, incident = null } = {},
 ) {
-  const heading = row.headline || row.name || 'Warning';
+  const heading = row.headline || row.name || t('Warning');
   const details = [];
   const body = row.description || row.longDescription;
   if (row.name && row.name !== heading) details.push(truncate(row.name, 48));
   if (body) details.push(...wrapCardText(body, 48, 4));
   const expires = formatAdelaideDateTime(row.expiryTime);
-  details.push(expires ? `Expires ${expires}` : 'No expiry set');
+  details.push(
+    expires ? t('Expires {time}', { time: expires }) : t('No expiry set'),
+  );
   const updated = formatAdelaideDateTime(row.editedTime ?? row.createdTime);
-  if (updated) details.push(`Updated ${updated}`);
+  if (updated) details.push(t('Updated {time}', { time: updated }));
   if (incident)
     details.push(
-      `Incident ${incident.id}${incident.name ? ` · ${titleCase(incident.name)}` : ''}`,
+      incident.name
+        ? t('Incident {id} · {name}', {
+            id: incident.id,
+            name: titleCase(incident.name),
+          })
+        : t('Incident {id}', { id: incident.id }),
     );
   const feed = formatAdelaideTime(feedTime);
-  if (feed) details.push(`Feed updated ${feed}`);
-  if (row.link) details.push('More information ↗ · click card to open');
+  if (feed) details.push(t('Feed updated {time}', { time: feed }));
+  if (row.link) details.push(t('More information ↗ · click card to open'));
 
-  const title = `${row.category || 'Warning'} · ${heading}`;
+  const title = `${row.category || t('Warning')} · ${heading}`;
   return {
     id: `sa-fire-warning-card:${row.id}`,
     selected: true,
     interactive: Boolean(row.link),
     ...(row.link
-      ? { accessibilityLabel: `Open ${truncate(title, 60)} on cfs.sa.gov.au` }
+      ? {
+          accessibilityLabel: t('Open {title} on cfs.sa.gov.au', {
+            title: truncate(title, 60),
+          }),
+        }
       : undefined),
     title: truncate(title, 48),
     details,

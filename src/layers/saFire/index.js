@@ -1,4 +1,5 @@
 import * as Cesium from 'cesium';
+import { msg, t, tn, translateKnown } from '../../i18n/index.js';
 import {
   INCIDENT_STATUS_BANDS,
   SA_FIRE_OVERLAY_SOURCE_ID,
@@ -34,8 +35,16 @@ const CARD_HOST_OPTIONS = Object.freeze({
 // Marker diameter in pixels by incident level (L1 small → L3 large).
 const LEVEL_PIXEL_SIZE = Object.freeze({ 1: 9, 2: 12, 3: 16 });
 const AGENCY_CHIPS = Object.freeze([
-  { agency: 'CFS', label: 'CFS', title: 'Country Fire Service incidents' },
-  { agency: 'MFS', label: 'MFS', title: 'Metropolitan Fire Service incidents' },
+  {
+    agency: 'CFS',
+    label: 'CFS', // i18n-ignore: agency acronym, shown as it is
+    title: msg('Country Fire Service incidents'),
+  },
+  {
+    agency: 'MFS',
+    label: 'MFS', // i18n-ignore: agency acronym, shown as it is
+    title: msg('Metropolitan Fire Service incidents'),
+  },
 ]);
 
 const ringPositions = (ring) =>
@@ -369,7 +378,7 @@ export function createSaFireIncidentsLayer({
         if (request.signal.aborted || _request !== request || !_enabled)
           return false;
         console.warn('[Data:SaFire] Fetch error:', e);
-        _lastError = e?.message || 'SA fire source unavailable';
+        _lastError = e?.message || msg('SA fire source unavailable');
         notify();
         return false;
       } finally {
@@ -423,24 +432,32 @@ export function createSaFireIncidentsLayer({
         counts.set(label, counts.get(label) + 1);
       }
       const feed = formatAdelaideTime(feedTime());
-      const lines = [feed ? `Feed updated ${feed}` : 'Feed time unavailable'];
+      const lines = [
+        feed
+          ? t('Feed updated {time}', { time: feed })
+          : t('Feed time unavailable'),
+      ];
       if (_meta) {
-        if (!_meta.warningsAvailable) lines.push('Warnings unavailable');
+        if (!_meta.warningsAvailable) lines.push(t('Warnings unavailable'));
         else
           lines.push(
             _warningById.size
-              ? `${_warningById.size} public warning${_warningById.size === 1 ? '' : 's'}`
-              : 'No active public warnings',
+              ? tn(
+                  _warningById.size,
+                  '{count} public warning',
+                  '{count} public warnings',
+                )
+              : t('No active public warnings'),
           );
         if (_meta.stale)
-          lines.push('Showing last good data · SA feed not responding');
+          lines.push(t('Showing last good data · SA feed not responding'));
       }
-      if (_lastError) lines.push(_lastError);
+      if (_lastError) lines.push(translateKnown(_lastError));
       return {
         chips: AGENCY_CHIPS.map(({ agency, label, title }) => ({
           id: `agency-${agency.toLowerCase()}`,
           label,
-          title,
+          title: t(title),
           active: _agencyOn.get(agency) !== false,
           onClick: () => {
             _agencyOn.set(agency, _agencyOn.get(agency) === false);
@@ -451,20 +468,22 @@ export function createSaFireIncidentsLayer({
           },
         })),
         legend: INCIDENT_STATUS_BANDS.map((band, index) => ({
-          label: band.label,
+          label: t(band.label),
           color: incidentStatusColor(band.status),
           count: counts.get(band.label),
           ...(index === 0
             ? {
-                blurb:
+                blurb: t(
                   'Marker colour shows reported status; size shows incident level (L1 to L3). Warning areas are tinted red, orange or yellow by category.',
+                ),
               }
             : {}),
         })),
         // The row's info node collapses newlines, so the facts are joined inline.
         info: lines.join(' · '),
-        infoTitle:
+        infoTitle: t(
           'South Australian CFS and MFS current incidents with public warnings. Times are Adelaide local time. Consult the official CFS and MFS channels for emergency decisions.',
+        ),
       };
     },
 

@@ -13,6 +13,7 @@
  * warnings payload without a `features` array) rejects the whole snapshot,
  * so a single bad record can never blank the layer.
  */
+import { msg } from '../../i18n/marker.js';
 
 /** South Australia bounding box plus margin; points outside are rejected. */
 export const SA_BOUNDS = Object.freeze({
@@ -497,7 +498,7 @@ export function validateSaFireSnapshot(payload) {
     !Array.isArray(payload.warnings) ||
     typeof payload.warningsAvailable !== 'boolean'
   )
-    throw new Error('Malformed SA fire snapshot');
+    throw new Error(msg('Malformed SA fire snapshot'));
   const ids = new Set();
   const incidents = payload.incidents.filter((row) => {
     if (!validIncidentRow(row) || ids.has(row.id)) return false;
